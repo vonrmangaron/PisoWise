@@ -437,3 +437,11 @@ select.inp { appearance: none; -webkit-appearance: none; padding-right: 32px; ba
 .done-box { border-radius: 12px; padding: 12px 14px; background: var(--save-tint); color: var(--save); display: flex; flex-direction: column; gap: 2px; font-size: 13px; font-variant-numeric: tabular-nums; }
 .done-box b { font-family: var(--f-disp); font-size: 22px; font-weight: 800; }
 .done-box .link { color: inherit; align-self: flex-start; font-size: 13px; }
+
+/* Month switcher */
+.msw { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: -4px; }
+.msw .x-btn { border: 1px solid var(--line); background: var(--surface); }
+.msw .x-btn:disabled { opacity: .35; }
+.msw-m { display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 0; }
+.msw-m b { font-family: var(--f-disp); font-weight: 800; font-size: 16px; }
+.msw-m .link { font-size: 12px; padding: 0; }

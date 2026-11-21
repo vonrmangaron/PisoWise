@@ -63,6 +63,7 @@
   let payDraft = null;
   let dlg = null;
   let saveDraft = null; // amount typed in Overview › To savings, not saved yet
+  let viewMonth = null;  // month shown on the Budget screen ('YYYY-MM'); null = this month
   let confirmReset = false;
   let rateBusy = false;
   let undo = null;
@@ -217,6 +218,13 @@
   }
   // Paid ticks: the due dates already paid (ymd strings).
   const isPaid = (it, d) => !!(it.paid && it.paid.includes(ymd(d)));
+  // The month shown on the Budget screen, its first and last day, and the rate to use for it
+  // (a finished month keeps the rate saved in History, so its numbers don't move).
+  const vm = () => viewMonth || monthKey(today());
+  const vmFrom = () => keyToDate(vm());
+  const vmTo = () => monthEnd(keyToDate(vm()));
+  const vmRate = () => { const h = S.history[vm()]; return vm() < monthKey(today()) && h && h.rate ? h.rate : rateValue(); };
+  const monthShift = n => { const d = keyToDate(monthKey(today())); return monthKey(new Date(d.getFullYear(), d.getMonth() + n, 1)); };
   const nextDue = it => occurrences(it, today(), addDays(today(), 800))[0] || null;
   function debtState(it) {
     if (!isDebt(it)) return null;
@@ -387,8 +395,8 @@
   }
 
   function homeHtml() {
-    const p = S.profile, t = today(), from = new Date(t.getFullYear(), t.getMonth(), 1), to = monthEnd(t);
-    const s = summary(from, to), rate = rateValue(), mk = monthKey(t);
+    const p = S.profile, t = today(), mk = vm(), isNow = mk === monthKey(t), from = vmFrom(), to = vmTo(), mon = from.getMonth();
+    const rate = vmRate(), s = summary(from, to, rate);
     const np = paydays(addDays(t, 1), addDays(t, 400))[0];
     const otherName = CUR[p.other].country;
     const twoCur = p.home !== p.other;
@@ -446,7 +454,7 @@
     // One list's rows: the phone shows one at a time under the tabs, tablet and desktop show them side by side.
     const body = key => {
       if (key === 'over') return overview();
-      const list = S.items.filter(it => it.list === key).map(it => ({ it, nd: nextDue(it) }))
+      const list = S.items.filter(it => it.list === key && (isNow || occurrences(it, from, to).length)).map(it => ({ it, nd: isNow ? nextDue(it) : occurrences(it, from, to).find(d => !isPaid(it, d)) || null }))
         .sort((a, b) => (a.nd ? a.nd.getTime() : 9e15) - (b.nd ? b.nd.getTime() : 9e15));
       const rows = list.map(({ it, nd }) => {
         const occ = occurrences(it, from, to), n = occ.length, dd = nd ? daysBetween(t, nd) : null, ds = debtState(it);
@@ -454,6 +462,7 @@
         const ini = `<span class="ini ini-${it.list}" aria-hidden="true">${esc((it.name.trim()[0] || '?').toUpperCase())}</span>`;
         const tick = n ? `<button type="button" class="tick${allPaid ? ' on' : np ? ' part' : ''}" data-act="paid" data-id="${it.id}" aria-pressed="${allPaid}" aria-label="${esc(it.name)}: ${allPaid ? 'paid this month. Tap to undo.' : 'mark as paid'}${n > 1 ? ` (${np} of ${n} paid)` : ''}">${allPaid ? ICON.check : np ? `<small>${np}/${n}</small>` : ICON.check}</button>` : '';
         const status = allPaid ? '<small class="due paid">paid ✓</small>' : np ? `<small class="due paid">${np} of ${n} paid</small>`
+          : !isNow ? `<small class="due">${nd ? 'due ' + esc(shortDate(nd)) : ''}</small>`
           : `<small class="due${dd !== null && dd <= 3 ? ' urgent' : ''}">${nd ? 'due ' + inDays(dd) : ds ? 'paid off' : 'done'}</small>`;
         const conv = it.cur !== p.home ? (rate ? `<small>≈ ${money(it.amt / rate, p.home)}</small>` : '<small>needs a rate</small>') : '';
         const debtTag = ds ? `<span class="tag-debt">${ds.remaining ? `${ds.remaining} left · ends ${MON[ds.end.getMonth()]} ${ds.end.getFullYear()}` : 'Paid off'}</span>` : '';
@@ -476,10 +485,15 @@
         <div class="top-name"><span class="eyebrow">PisoWise</span><span class="hello">Hi, ${esc(p.name)}</span></div>
         ${rateBtnHtml()}
       </header>
-      <section class="hero" aria-label="This month">
+      <div class="msw">
+        <button type="button" class="x-btn" data-act="mon" data-d="-1" aria-label="Previous month"${mk <= monthShift(-12) ? ' disabled' : ''}>${ICON.chevL}</button>
+        <span class="msw-m"><b>${MON_LONG[mon]} ${from.getFullYear()}</b>${isNow ? '' : '<button type="button" class="link" data-act="mon-now">Back to this month</button>'}</span>
+        <button type="button" class="x-btn" data-act="mon" data-d="1" aria-label="Next month"${mk >= monthShift(12) ? ' disabled' : ''}>${ICON.chevR}</button>
+      </div>
+      <section class="hero" aria-label="${esc(MON_LONG[mon])}">
         <div class="hero-top">
-          <div><div class="hero-label">${left >= 0 ? 'Leftover' : 'Over budget'} · ${MON_LONG[t.getMonth()]}</div><div class="hero-amt${left < 0 ? ' neg' : ''}">${money(Math.abs(left), p.home)}</div></div>
-          <span class="badge">${np ? `Next pay ${np.getDate()} ${MON[np.getMonth()]}` : 'no payday'}</span>
+          <div><div class="hero-label">${left >= 0 ? 'Leftover' : 'Over budget'} · ${MON_LONG[mon]}</div><div class="hero-amt${left < 0 ? ' neg' : ''}">${money(Math.abs(left), p.home)}</div></div>
+          ${isNow ? `<span class="badge">${np ? `Next pay ${np.getDate()} ${MON[np.getMonth()]}` : 'no payday'}</span>` : ''}
         </div>
         <div class="bar" aria-hidden="true"><span style="width:${pct(s.other)};background:var(--other-bar)"></span><span style="width:${pct(s.home)};background:var(--home-bar)"></span>${moved ? `<span style="width:${pct(moved.amt)};background:var(--save-bar)"></span>` : ''}</div>
         <div class="hero-grid">
@@ -516,18 +530,18 @@
     return out;
   }
   function openSent() {
-    const t = today(), mk = monthKey(t), s = summary(new Date(t.getFullYear(), t.getMonth(), 1), monthEnd(t)), cur = (S.sent || {})[mk];
+    const mk = vm(), s = summary(vmFrom(), vmTo(), vmRate()), cur = (S.sent || {})[mk];
     dlg = { kind: 'sent', amt: cur ? String(cur.amt) : (s.other > 0 ? (Math.round(s.other * 100) / 100).toFixed(2) : ''), tick: true };
     renderDlg();
   }
   function sentConv() {
-    const p = S.profile, rate = rateValue(), t = today(), s = summary(new Date(t.getFullYear(), t.getMonth(), 1), monthEnd(t));
+    const p = S.profile, rate = vmRate(), s = summary(vmFrom(), vmTo(), rate);
     if (p.home === p.other || !rate) return '';
     const v = num(dlg.amt) * rate, need = s.other * rate, diff = v - need;
     return `≈ <b>${money(v, p.other)}</b> at ${sym(p.other).trim()}${rate.toFixed(2)} · this month's list ${money(need, p.other)}<br>${!(num(dlg.amt) > 0) ? '' : Math.abs(diff) < 1 ? 'Covers the whole list.' : diff > 0 ? money(diff, p.other) + ' more than the list.' : money(-diff, p.other) + ' less than the list.'}`;
   }
   function renderDlg() {
-    const p = S.profile, t = today(), mk = monthKey(t), otherName = CUR[p.other].country;
+    const p = S.profile, mk = vm(), t = vmFrom(), otherName = CUR[p.other].country;
     if (dlg.kind === 'sent') {
       const open = otherOpen(mk), had = (S.sent || {})[mk];
       $modal.innerHTML = `<div class="overlay" data-act="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
@@ -552,10 +566,10 @@
   function saveSent() {
     const amt = Math.round(num(dlg.amt) * 100) / 100, err = document.getElementById('dlg-err');
     if (!(amt > 0)) { err.textContent = 'Please enter the amount you sent.'; err.hidden = false; return; }
-    const t = today(), mk = monthKey(t), prevSent = (S.sent || {})[mk];
+    const t = today(), mk = vm(), prevSent = (S.sent || {})[mk];
     const ticked = dlg.tick ? otherOpen(mk) : [];
     if (!S.sent) S.sent = {};
-    S.sent[mk] = { amt, date: ymd(t), rate: rateValue() || null };
+    S.sent[mk] = { amt, date: ymd(t), rate: vmRate() || null };
     for (const { it, k } of ticked) it.paid = (it.paid || []).concat(k);
     save(); closeDlg(); render();
     toast(ticked.length ? `Saved · ${ticked.length} cost${ticked.length === 1 ? '' : 's'} ticked` : 'Money sent saved', { label: 'Undo', run: () => {
@@ -565,12 +579,12 @@
     } });
   }
   function saveQuick(q) {
-    const t = today(), s = summary(new Date(t.getFullYear(), t.getMonth(), 1), monthEnd(t)), lo = Math.max(s.saved, 0);
+    const s = summary(vmFrom(), vmTo(), vmRate()), lo = Math.max(s.saved, 0);
     saveDraft = q <= 0 ? '' : (Math.floor(lo * q * 100) / 100).toFixed(2);
     render();
   }
   function confirmSave() {
-    const t = today(), mk = monthKey(t);
+    const t = today(), mk = vm();
     if (!S.savings) S.savings = {};
     S.savings[mk] = { amt: dlg.amt, date: ymd(t) };
     saveDraft = null;
@@ -611,8 +625,8 @@
           <div><span class="lst"><span class="dot dot-other"></span>${esc(otherLabel)}</span><span>${money(m.other, m.homeCur)}</span></div>${lines('other')}
           <div><span class="lst"><span class="dot dot-home"></span>Local</span><span>${money(m.home, m.homeCur)}</span></div>${lines('home')}
           ${m.otherCur !== m.homeCur ? `<div><span class="k">Rate used</span><span>${m.rate ? `${sym(m.homeCur)}1 = ${sym(m.otherCur)}${m.rate.toFixed(2)}` : 'none'}</span></div>` : ''}
-          ${m.sent ? `<div><span class="k">Sent to ${esc(otherLabel)}</span><span>${money(m.sent, m.homeCur)}</span></div>` : ''}
-          ${m.moved ? `<div><span class="k">Moved to savings</span><span>${money(m.moved, m.homeCur)}</span></div>` : ''}
+          ${(m.sent = ((S.sent || {})[m.key] || {}).amt || 0) ? `<div><span class="k">Sent to ${esc(otherLabel)}</span><span>${money(m.sent, m.homeCur)}</span></div>` : ''}
+          ${(m.moved = ((S.savings || {})[m.key] || {}).amt || 0) ? `<div><span class="k">Moved to savings</span><span>${money(m.moved, m.homeCur)}</span></div>` : ''}
           <div><span class="k">Saved</span><b>${m.income > 0 ? Math.round(m.saved / m.income * 100) + '% of income' : '—'}</b></div>
         </div>` : ''}
       </div>`;
@@ -976,7 +990,7 @@
   function togglePaid(id) {
     const it = S.items.find(x => x.id === id);
     if (!it) return;
-    const t = today(), occ = occurrences(it, new Date(t.getFullYear(), t.getMonth(), 1), monthEnd(t)).map(ymd);
+    const t = today(), occ = occurrences(it, vmFrom(), vmTo()).map(ymd);
     if (!occ.length) return;
     const paid = (it.paid || []).filter(k => k >= ymd(new Date(t.getFullYear() - 1, t.getMonth(), 1))); // keep a year
     const open = occ.filter(k => !paid.includes(k));
@@ -989,7 +1003,7 @@
   // ---------- month pay editor ----------
   // payDraft: { key, pays: [{date, amt:string}], extras: [{name, amt:string}] }
   function openPay(key) {
-    const k = key || monthKey(today()), m = monthPay(k), f = keyToDate(k);
+    const k = key || vm(), m = monthPay(k), f = keyToDate(k);
     payDraft = {
       key: k,
       pays: paydays(f, monthEnd(f)).map(d => ({ date: ymd(d), amt: m.pays[ymd(d)] != null ? String(m.pays[ymd(d)]) : '' })),
@@ -1007,7 +1021,7 @@
   }
   function renderPay() {
     const p = S.profile, d = payDraft, f = keyToDate(d.key), cur = monthKey(today());
-    const canPrev = d.key > cur, canNext = d.key < monthKey(new Date(today().getFullYear(), today().getMonth() + 12, 1));
+    const canPrev = d.key > monthShift(-12), canNext = d.key < monthShift(12);
     const s = sym(p.home).trim();
     const pays = d.pays.length ? d.pays.map((x, i) => {
       const dt = parse(x.date);
@@ -1117,9 +1131,11 @@
     else if (act === 'paid') togglePaid(+b.dataset.id);
     else if (act === 'pay') openPay();
     else if (act === 'sent') openSent();
+    else if (act === 'mon') { const d = keyToDate(vm()), k = monthKey(new Date(d.getFullYear(), d.getMonth() + +b.dataset.d, 1)); viewMonth = k === monthKey(today()) ? null : k; saveDraft = null; render(); }
+    else if (act === 'mon-now') { viewMonth = null; saveDraft = null; render(); }
     else if (act === 'saveq') saveQuick(+b.dataset.q);
-    else if (act === 'save-open') { const lo = Math.max(summary(new Date(today().getFullYear(), today().getMonth(), 1), monthEnd(today())).saved, 0), v = Math.min(Math.round(num(saveDraft || '0') * 100) / 100, lo); if (v > 0) { dlg = { kind: 'save', amt: v, done: false }; renderDlg(); } }
-    else if (act === 'unsave') { const mk = monthKey(today()), was = S.savings[mk]; delete S.savings[mk]; saveDraft = String(was.amt); save(); render(); toast('Savings unmarked', { label: 'Undo', run: () => { S.savings[mk] = was; saveDraft = null; save(); render(); } }); }
+    else if (act === 'save-open') { const lo = Math.max(summary(vmFrom(), vmTo(), vmRate()).saved, 0), v = Math.min(Math.round(num(saveDraft || '0') * 100) / 100, lo); if (v > 0) { dlg = { kind: 'save', amt: v, done: false }; renderDlg(); } }
+    else if (act === 'unsave') { const mk = vm(), was = S.savings[mk]; delete S.savings[mk]; saveDraft = String(was.amt); save(); render(); toast('Savings unmarked', { label: 'Undo', run: () => { S.savings[mk] = was; saveDraft = null; save(); render(); } }); }
     else if (act === 'edit') { const it = S.items.find(x => x.id === +b.dataset.id); if (it) openEditor(it); }
     else if (act === 'month') { openMonth = openMonth === b.dataset.key && b.classList.contains('month-btn') ? '-' : b.dataset.key; render(); }
     else if (act === 'ratemode') { document.querySelector('#setup [name="ratemode"]').value = b.dataset.mode; syncSetup(); }
@@ -1162,7 +1178,7 @@
       const act = b.dataset.act;
       if (act === 'cancel') closeDlg();
       else if (act === 'sent-save') saveSent();
-      else if (act === 'sent-del') { const mk = monthKey(today()), was = S.sent[mk]; delete S.sent[mk]; save(); closeDlg(); render(); toast('Money sent removed', { label: 'Undo', run: () => { S.sent[mk] = was; save(); render(); } }); }
+      else if (act === 'sent-del') { const mk = vm(), was = S.sent[mk]; delete S.sent[mk]; save(); closeDlg(); render(); toast('Money sent removed', { label: 'Undo', run: () => { S.sent[mk] = was; save(); render(); } }); }
       else if (act === 'save-ok') confirmSave();
       return;
     }
