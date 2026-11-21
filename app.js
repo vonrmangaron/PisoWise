@@ -63,6 +63,7 @@
   let payDraft = null;
   let dlg = null;
   let saveDraft = null; // amount typed in Overview › To savings, not saved yet
+  let openSubs = new Set(); // costs whose breakdown is open in the list
   let viewMonth = null;  // month shown on the Budget screen ('YYYY-MM'); null = this month
   let confirmReset = false;
   let rateBusy = false;
@@ -435,12 +436,13 @@
       const lo = Math.max(left, 0);
       const sv = moved ? Math.min(moved.amt, lo) : Math.min(Math.max(num(saveDraft || '0'), 0), lo);
       const base = Math.max(s.income, s.costs);
+      const inOther = v => twoCur && rate ? '≈ ' + money(v * rate, p.other) : ''; // spare in pesos
       if (base <= 0) return `<div class="empty"><b>Nothing to show yet</b><span>Add your pay and costs to see where your money goes.</span></div>`;
       const segs = [
         { n: otherName, v: s.other, c: 'var(--other)', sub: (twoCur && rate ? money(s.other * rate, p.other) + ' · ' : '') + `${count('other')} costs` },
         { n: 'Local', v: s.home, c: 'var(--home-bar)', sub: `${count('home')} costs` },
         { n: 'Savings', v: sv, c: 'var(--save)', sub: moved ? `moved ${shortDate(parse(moved.date))} ✓` : sv > 0 ? 'planned' : 'nothing yet' },
-        { n: 'Spare', v: lo - sv, c: 'var(--spare)', sub: 'for anything else this month' }
+        { n: 'Spare', v: lo - sv, c: 'var(--spare)', sub: (inOther(lo - sv) ? inOther(lo - sv) + ' · ' : '') + 'for anything else this month' }
       ];
       const pd = segs.map(x => `<div class="pd"><i style="background:${x.c}"></i><span class="pd-n">${esc(x.n)}<small>${esc(x.sub)}</small></span><span class="pd-a">${money(x.v, p.home)}<small>${Math.round(x.v / base * 100)}%</small></span></div>`).join('');
       const formula = `<p class="lo-f">Pay ${money(s.income, p.home)} − Local ${money(s.home, p.home)} − ${esc(otherName)} ${money(s.other, p.home)} = <b>${money(left, p.home)}</b></p>`;
@@ -448,12 +450,12 @@
       if (left <= 0) plan = `<div><h3>Over budget</h3>${formula}<p class="sub">Your costs this month are ${money(-left, p.home)} more than your pay.</p></div>`;
       else if (moved) plan = `<div><h3>Leftover this month</h3>${formula}</div>
         <div class="split" aria-hidden="true"><span style="width:${(sv / lo * 100).toFixed(1)}%;background:var(--save)"></span><span style="width:${((lo - sv) / lo * 100).toFixed(1)}%;background:var(--spare)"></span></div>
-        <div class="done-box"><span>Moved to savings on ${esc(shortDate(parse(moved.date)))} ✓</span><b>${money(moved.amt, p.home)}</b><span>Spare for the month: ${money(lo - sv, p.home)}</span><button type="button" class="link" data-act="unsave">Change</button></div>`;
+        <div class="done-box"><span>Moved to savings on ${esc(shortDate(parse(moved.date)))} ✓</span><b>${money(moved.amt, p.home)}</b><span>Spare for the month: ${money(lo - sv, p.home)}${inOther(lo - sv) ? ` (${inOther(lo - sv)})` : ''}</span><button type="button" class="link" data-act="unsave">Change</button></div>`;
       else plan = `<div><h3>Leftover this month</h3>${formula}</div>
         <div class="split" aria-hidden="true"><span style="width:${(sv / lo * 100).toFixed(1)}%;background:var(--save)"></span><span style="width:${((lo - sv) / lo * 100).toFixed(1)}%;background:var(--spare)"></span></div>
         <div class="pots">
           <label class="pot"><span><i style="background:var(--save)"></i>To savings</span><span class="prefix"><span>${esc(sym(p.home).trim())}</span><input class="num" id="save-amt" data-save inputmode="decimal" placeholder="0.00" value="${esc(saveDraft || '')}" aria-label="Amount to move to savings"></span></label>
-          <div class="pot"><span><i style="background:var(--spare)"></i>Spare</span><b id="spare-amt">${money(lo - sv, p.home)}</b></div>
+          <div class="pot"><span><i style="background:var(--spare)"></i>Spare</span><b id="spare-amt">${money(lo - sv, p.home)}</b>${inOther(lo - sv) ? `<small class="pot-sub" id="spare-other">${inOther(lo - sv)}</small>` : ''}</div>
         </div>
         <div class="chips"><button type="button" class="chip" data-act="saveq" data-q="0">None</button><button type="button" class="chip" data-act="saveq" data-q="0.5">Half</button><button type="button" class="chip" data-act="saveq" data-q="1">All</button></div>
         <button type="button" class="btn" data-act="save-open"${sv > 0 ? '' : ' disabled'}>I moved ${money(sv, p.home)} to savings</button>`;
@@ -469,10 +471,13 @@
       const offList = list.filter(x => x.off);
       const rowHtml = ({ it, nd, off }) => {
         const occ = occurrences(it, from, to), n = occ.length, dd = nd ? daysBetween(t, nd) : null, ds = debtState(it);
+        const subsN = it.subs && it.subs.length ? it.subs.length : 0, subsOpen = subsN && openSubs.has(it.id);
+        const subsBtn = subsN ? `<button type="button" class="exp${subsOpen ? ' on' : ''}" data-act="subs" data-id="${it.id}" aria-expanded="${!!subsOpen}" aria-label="${subsOpen ? 'Hide' : 'Show'} what's in ${esc(it.name)}">${ICON.chev}</button>` : '';
+        const subsList = subsOpen ? `<div class="subs">${it.subs.map(x => `<div class="subl"><span>${esc(x.name)}</span><span>${money(x.amt, it.cur)}</span></div>`).join('')}<div class="subl t"><span>Total</span><span>${money(it.amt, it.cur)}</span></div></div>` : '';
         const sw = n ? `<button type="button" class="sw${off ? '' : ' on'}" data-act="count" data-id="${it.id}" role="switch" aria-checked="${!off}" aria-label="Count ${esc(it.name)} in ${esc(MON_LONG[mon])}" title="${off ? 'Not counted in ' : 'Counted in '}${esc(MON_LONG[mon])}"><i></i></button>` : '';
         if (off) return `<div class="row-w is-off"><span class="tick none" aria-hidden="true"></span><button type="button" class="row has-tick" data-act="edit" data-id="${it.id}">
           <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${esc(dueDesc(it))}</span>${it.optional ? '<span class="tag-opt">Optional</span>' : ''}</span>
-          <span class="row-amt"><b>${money(it.amt * n, it.cur)}</b><small class="due">not counted</small></span></button>${sw}</div>`;
+          <span class="row-amt"><b>${money(it.amt * n, it.cur)}</b><small class="due">not counted</small></span></button>${subsBtn}${sw}</div>${subsList}`;
         const np = occ.filter(d => isPaid(it, d)).length, allPaid = n > 0 && np === n;
         const ini = `<span class="ini ini-${it.list}" aria-hidden="true">${esc((it.name.trim()[0] || '?').toUpperCase())}</span>`;
         const tick = n ? `<button type="button" class="tick${allPaid ? ' on' : np ? ' part' : ''}" data-act="paid" data-id="${it.id}" aria-pressed="${allPaid}" aria-label="${esc(it.name)}: ${allPaid ? 'paid this month. Tap to undo.' : 'mark as paid'}${n > 1 ? ` (${np} of ${n} paid)` : ''}">${allPaid ? ICON.check : np ? `<small>${np}/${n}</small>` : ICON.check}</button>` : '';
@@ -483,9 +488,9 @@
         const debtTag = ds ? `<span class="tag-debt">${ds.remaining ? `${ds.remaining} left · ends ${MON[ds.end.getMonth()]} ${ds.end.getFullYear()}` : 'Paid off'}</span>` : '';
         return `<div class="row-w${allPaid ? ' is-paid' : ''}">${tick}<button type="button" class="row${nd || n ? '' : ' done'}${tick ? ' has-tick' : ''}" data-act="edit" data-id="${it.id}">
           ${tick ? '' : ini}
-          <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${esc(dueDesc(it))}${n > 1 ? ` · ${n}× this month` : ''}</span>${debtTag}${it.optional ? '<span class="tag-opt">Optional</span>' : ''}</span>
+          <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${esc(dueDesc(it))}${n > 1 ? ` · ${n}× this month` : ''}${subsN ? ` · ${subsN} item${subsN === 1 ? '' : 's'}` : ''}</span>${debtTag}${it.optional ? '<span class="tag-opt">Optional</span>' : ''}</span>
           <span class="row-amt"><b>${money(it.amt, it.cur)}</b>${conv}${status}</span>
-        </button>${sw}</div>`;
+        </button>${subsBtn}${sw}</div>${subsList}`;
       };
       const offTotal = offList.reduce((a, { it }) => a + (toHome(it.amt, it.cur, rate) || 0) * occurrences(it, from, to).length, 0);
       const rows = list.filter(x => !x.off).map(rowHtml).join('')
@@ -911,8 +916,8 @@
   // ---------- cost editor ----------
   function openEditor(it, list) {
     const p = S.profile;
-    draft = it ? Object.assign({}, it, { amt: String(it.amt), left: it.left ? String(it.left) : '', every: String(it.every || 2), optional: !!it.optional, countNow: counted(it, vm()) })
-      : { id: null, list, name: '', amt: '', cur: list === 'home' ? p.home : p.other, rep: 'month', every: '2', due: ymd(vm() === monthKey(today()) ? today() : vmFrom()), left: '', optional: false, countNow: true };
+    draft = it ? Object.assign({}, it, { amt: String(it.amt), left: it.left ? String(it.left) : '', every: String(it.every || 2), optional: !!it.optional, countNow: counted(it, vm()), subs: it.subs && it.subs.length ? it.subs.map(x => ({ name: x.name, amt: String(x.amt) })) : null })
+      : { id: null, list, name: '', amt: '', cur: list === 'home' ? p.home : p.other, rep: 'month', every: '2', due: ymd(vm() === monthKey(today()) ? today() : vmFrom()), left: '', optional: false, countNow: true, subs: null };
     clearTimeout(toastTimer);
     $toast.hidden = true;
     renderEditor();
@@ -920,9 +925,10 @@
     if (n && !it) n.focus();
   }
   function closeEditor() { draft = null; $modal.innerHTML = ''; }
+  const subsTotal = () => (draft.subs || []).reduce((a, x) => a + num(x.amt), 0);
 
   function editorTexts() {
-    const p = S.profile, d = draft, amt = num(d.amt), rate = rateValue();
+    const p = S.profile, d = draft, amt = d.subs ? subsTotal() : num(d.amt), rate = rateValue();
     let conv = '';
     if (p.home !== p.other && amt > 0) {
       if (d.cur === p.home) conv = rate ? `≈ ${money(amt * rate, p.other)} in ${CUR[p.other].country}` : '';
@@ -954,8 +960,16 @@
       <div class="dlg-head"><h2 id="dlg-t">${d.id ? 'Edit cost' : 'New cost'}</h2><span class="pill pill-${d.list}">${esc(listName)}</span></div>
       <label class="fld"><span>Name</span><input class="inp" id="d-name" value="${esc(d.name)}" placeholder="${d.list === 'home' ? 'e.g. Rent' : 'e.g. Family allowance'}" maxlength="60"></label>
       <div class="fld"><span>Amount each time</span>
-        <div class="amt-row">${curs}<input class="inp num" id="d-amt" inputmode="decimal" value="${esc(d.amt)}" placeholder="0" style="text-align:right" aria-label="Amount"></div>
-        <small id="d-conv">${esc(x.conv)}</small></div>
+        <div class="amt-row">${curs}<input class="inp num" id="d-amt" inputmode="decimal" value="${esc(d.subs ? subsTotal().toFixed(2) : d.amt)}" placeholder="0" style="text-align:right" aria-label="Amount"${d.subs ? ' readonly aria-readonly="true"' : ''}></div>
+        <small id="d-conv">${esc(x.conv)}</small>${d.subs ? '<small>= total of the lines below</small>' : ''}</div>
+      <div class="brk">
+        <label class="chk"><input type="checkbox" id="d-brk"${d.subs ? ' checked' : ''}><span>Break it down<small class="sub" style="display:block;font-weight:400">Add lines — the amount is their total</small></span></label>
+        ${d.subs ? `<div class="sublines">${d.subs.map((x, i) => `<div class="sl">
+            <input class="inp" data-subn="${i}" value="${esc(x.name)}" placeholder="What" maxlength="40" aria-label="Line ${i + 1} name">
+            <span class="prefix"><span>${esc(sym(d.cur).trim())}</span><input class="num" data-suba="${i}" inputmode="decimal" value="${esc(x.amt)}" placeholder="0" aria-label="Line ${i + 1} amount"></span>
+            <button type="button" class="x-btn" data-act="sub-del" data-i="${i}" aria-label="Remove line ${i + 1}">${ICON.x}</button></div>`).join('')}
+          <button type="button" class="add-btn" data-act="sub-add" style="margin:0">${ICON.plus}Add a line</button></div>` : ''}
+      </div>
       <div class="fld"><span>Repeats</span><div class="chips">${REPEATS.map(([k, l]) => `<button type="button" class="chip" data-act="rep" data-rep="${k}" aria-pressed="${d.rep === k}">${l}</button>`).join('')}</div>
         ${d.rep === 'every' ? `<label class="inline"><span>Every</span><input class="inp" id="d-every" inputmode="numeric" value="${esc(d.every)}" aria-label="Number of months"><span>months</span></label><small>From 2 to 24 months — e.g. 2 for every second month, 6 for twice a year.</small>` : ''}</div>
       <label class="fld"><span>${d.rep === 'once' ? 'Due on' : 'Next due'}</span><input class="inp" type="date" id="d-due" value="${esc(d.due)}"><small id="d-next" class="ok">${esc(x.next)}</small></label>
@@ -979,9 +993,19 @@
   function saveItem() {
     const d = draft, err = document.getElementById('d-err');
     const fail = m => { err.textContent = m; err.hidden = false; };
-    const amt = num(d.amt), left = Math.floor(num(d.left));
+    let subs = null;
+    if (d.subs) {
+      subs = [];
+      for (const x of d.subs) {
+        if (!x.name.trim() && !x.amt.trim()) continue;
+        if (!hasNum(x.amt)) return fail('Please enter an amount for each line (0 is fine), or remove it.');
+        subs.push({ name: x.name.trim() || 'Item', amt: Math.round(num(x.amt) * 100) / 100 });
+      }
+      if (!subs.length) return fail('Please add at least one line, or untick Break it down.');
+    }
+    const amt = subs ? Math.round(subs.reduce((a, x) => a + x.amt, 0) * 100) / 100 : num(d.amt), left = Math.floor(num(d.left));
     if (!d.name.trim()) return fail('Please give this cost a name.');
-    if (!hasNum(d.amt)) return fail('Please enter an amount (0 is fine).');
+    if (!subs && !hasNum(d.amt)) return fail('Please enter an amount (0 is fine).');
     if (!d.due) return fail('Please pick a due date.');
     if (d.left !== '' && d.rep !== 'once' && !(left > 0)) return fail('Please enter how many payments are left.');
     const item = {
@@ -996,6 +1020,7 @@
       item.every = ev;
     }
     if (d.optional) item.optional = true;
+    if (subs) item.subs = subs;
     const cnt = Object.assign({}, d.count), mk = vm();
     if (d.countNow === !d.optional) delete cnt[mk]; else cnt[mk] = d.countNow;
     if (Object.keys(cnt).length) item.count = cnt;
@@ -1119,7 +1144,7 @@
     let added = 0;
     for (const x of list) {
       const amt = num(x.amt), lst = x.list === 'home' ? 'home' : 'other';
-      if (!x.name || !hasNum(x.amt)) continue;
+      if (!x.name || (!hasNum(x.amt) && !(Array.isArray(x.subs) && x.subs.length))) continue;
       const cur = x.cur === 'home' || x.cur === p.home ? p.home : x.cur === 'other' || x.cur === p.other ? p.other : lst === 'home' ? p.home : p.other;
       const rep = REPS.includes(x.rep) ? x.rep : 'month';
       const due = /^\d{4}-\d{2}-\d{2}$/.test(x.due || '') ? x.due : t;
@@ -1127,6 +1152,10 @@
         left: rep !== 'once' && x.left > 0 ? Math.floor(x.left) : 0, paid: [], created: due < t ? due : t };
       if (rep === 'every') it.every = Math.min(24, Math.max(2, Math.floor(num(x.every)) || 2));
       if (x.optional) it.optional = true;
+      if (Array.isArray(x.subs) && x.subs.length) {
+        it.subs = x.subs.filter(y => y && hasNum(y.amt)).map(y => ({ name: String(y.name || 'Item').slice(0, 40), amt: Math.round(num(y.amt) * 100) / 100 }));
+        if (it.subs.length) it.amt = Math.round(it.subs.reduce((a, y) => a + y.amt, 0) * 100) / 100; else delete it.subs;
+      }
       S.items.push(it);
       added++;
     }
@@ -1166,6 +1195,7 @@
     else if (act === 'paid') togglePaid(+b.dataset.id);
     else if (act === 'pay') openPay();
     else if (act === 'sent') openSent();
+    else if (act === 'subs') { const id = +b.dataset.id; if (openSubs.has(id)) openSubs.delete(id); else openSubs.add(id); render(); }
     else if (act === 'count') {
       const it = S.items.find(x => x.id === +b.dataset.id), mk = vm();
       if (!it) return;
@@ -1258,6 +1288,8 @@
     else if (act === 'cur') { draft.cur = b.dataset.cur; renderEditor(); }
     else if (act === 'rep') { draft.rep = b.dataset.rep; renderEditor(); }
     else if (act === 'cnt') { draft.countNow = b.dataset.on === '1'; renderEditor(); }
+    else if (act === 'sub-add') { draft.subs.push({ name: '', amt: '' }); renderEditor(); const el = document.querySelector(`[data-subn="${draft.subs.length - 1}"]`); if (el) el.focus(); }
+    else if (act === 'sub-del') { draft.subs.splice(+b.dataset.i, 1); renderEditor(); }
   });
   $modal.addEventListener('input', e => {
     if (dlg) {
@@ -1280,6 +1312,8 @@
     else if (id === 'd-due') draft.due = e.target.value;
     else if (id === 'd-left') draft.left = e.target.value.replace(/[^0-9]/g, '');
     else if (id === 'd-every') draft.every = e.target.value.replace(/[^0-9]/g, '');
+    else if (e.target.dataset.subn != null) draft.subs[+e.target.dataset.subn].name = e.target.value;
+    else if (e.target.dataset.suba != null) { draft.subs[+e.target.dataset.suba].amt = e.target.value; const a = document.getElementById('d-amt'); if (a) a.value = subsTotal().toFixed(2); }
     updateEditorTexts();
   });
   $modal.addEventListener('change', e => {
@@ -1290,6 +1324,12 @@
     }
     if (!draft) return;
     if (e.target.id === 'd-due') { draft.due = e.target.value; updateEditorTexts(); }
+    if (e.target.id === 'd-brk') {
+      if (e.target.checked) draft.subs = [{ name: draft.name.trim(), amt: hasNum(draft.amt) ? String(num(draft.amt)) : '' }];
+      else { draft.amt = subsTotal().toFixed(2); draft.subs = null; }
+      renderEditor();
+      const el = document.querySelector('[data-suba="0"]'); if (el && e.target.checked) el.focus();
+    }
     if (e.target.id === 'd-opt') { const was = draft.optional; draft.optional = e.target.checked; if (draft.countNow === !was) draft.countNow = !draft.optional; renderEditor(); }
     if (e.target.id === 'd-debt') {
       draft.left = e.target.checked ? '12' : '';
