@@ -1,5 +1,5 @@
 'use strict';
-// BudgetWise accounts: Supabase sign-in + one saved budget per account.
+// PisoWise accounts: Supabase sign-in + one saved budget per account.
 // Plain fetch calls to Supabase's auth and data APIs — no library to load.
 // The URL and publishable key are public by design; Row Level Security (supabase.sql) keeps each budget private.
 window.Cloud = (() => {

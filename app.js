@@ -36,7 +36,7 @@
     x: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     chevL: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
     chevR: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
-    logo: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5EEAD4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l5-5 4 3 7-8"/><path d="M15 7h5v5"/></svg>',
+    logo: '<svg width="26" height="26" viewBox="22 16 148 148" aria-hidden="true"><g fill="#fff"><circle cx="93" cy="38" r="13"/><path d="M66 76 L80 50 L96 72 Z"/><ellipse cx="92" cy="110" rx="56" ry="44"/><rect x="138" y="98" width="22" height="26" rx="8"/><circle cx="36" cy="104" r="7"/><rect x="58" y="138" width="16" height="24" rx="5"/><rect x="106" y="138" width="16" height="24" rx="5"/></g><g fill="#1747B5"><rect x="91" y="30" width="4" height="16" rx="2"/><rect x="76" y="74" width="34" height="8" rx="4"/><circle cx="124" cy="98" r="7"/></g></svg>',
     refresh: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
     check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
     plus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
@@ -61,13 +61,15 @@
   let openMonth = null;
   let draft = null;
   let payDraft = null;
+  let dlg = null;
+  let saveDraft = null; // amount typed in Overview › To savings, not saved yet
   let confirmReset = false;
   let rateBusy = false;
   let undo = null;
   let toastTimer = 0;
 
   // ---------- storage ----------
-  function blank() { return { v: 1, profile: null, items: [], rate: null, history: {}, pay: {}, seen: null, nextId: 1 }; }
+  function blank() { return { v: 1, profile: null, items: [], rate: null, history: {}, pay: {}, sent: {}, savings: {}, seen: null, nextId: 1 }; }
   const tidy = s => s && s.v === 1 ? Object.assign(blank(), s) : null;
   // This device keeps a copy of the account's budget so it opens fast and works offline.
   function loadLocal() {
@@ -313,7 +315,8 @@
       const f = keyToDate(k), s = summary(f, monthEnd(f));
       S.history[k] = {
         pays: s.pays, income: s.income, salary: S.profile.salary, payLines: s.payLines, other: s.other, home: s.home, saved: s.saved,
-        rate: rateValue(), homeCur: S.profile.home, otherCur: S.profile.other, lines: s.lines
+        rate: rateValue(), homeCur: S.profile.home, otherCur: S.profile.other, lines: s.lines,
+        sent: ((S.sent || {})[k] || {}).amt || 0, moved: ((S.savings || {})[k] || {}).amt || 0
       };
       changed = true;
     }
@@ -363,7 +366,7 @@
 
   function navHtml() {
     const b = (v, label) => `<button type="button" data-act="nav" data-view="${v}"${view === v ? ' aria-current="page"' : ''}>${ICON[v === 'home' ? 'budget' : v]}${label}</button>`;
-    return `<nav class="nav" aria-label="Main"><div class="nav-brand"><span class="logo" aria-hidden="true">${ICON.logo}</span>BudgetWise</div><div class="nav-in">${b('home', 'Budget')}${b('history', 'History')}${b('setup', 'Setup')}</div><p class="nav-foot"><span class="sync-dot" data-sync="${sync.state}">${esc(syncText())}</span></p></nav>`;
+    return `<nav class="nav" aria-label="Main"><div class="nav-brand"><span class="logo" aria-hidden="true">${ICON.logo}</span><span>Piso<span class="wm-a">Wise</span></span></div><div class="nav-in">${b('home', 'Budget')}${b('history', 'History')}${b('setup', 'Setup')}</div><p class="nav-foot"><span class="sync-dot" data-sync="${sync.state}">${esc(syncText())}</span></p></nav>`;
   }
 
   function rateBtnHtml() {
@@ -385,36 +388,64 @@
 
   function homeHtml() {
     const p = S.profile, t = today(), from = new Date(t.getFullYear(), t.getMonth(), 1), to = monthEnd(t);
-    const s = summary(from, to), rate = rateValue();
+    const s = summary(from, to), rate = rateValue(), mk = monthKey(t);
     const np = paydays(addDays(t, 1), addDays(t, 400))[0];
     const otherName = CUR[p.other].country;
+    const twoCur = p.home !== p.other;
+    const sent = (S.sent || {})[mk], moved = (S.savings || {})[mk];
     const pct = n => s.income > 0 ? Math.max(0, Math.min(100, n / s.income * 100)).toFixed(1) + '%' : '0%';
-    const saveLabel = s.saved >= 0 ? 'You can save' : 'Over budget';
-    const badge = s.income <= 0 ? 'no payday' : s.saved >= 0 ? Math.round(s.saved / s.income * 100) + '% of income' : 'cut costs';
-
-    const soon = [];
-    for (const it of S.items) for (const d of occurrences(it, t, addDays(t, 7))) if (!isPaid(it, d)) soon.push({ d, it });
-    soon.sort((a, b) => a.d - b.d);
+    const left = s.saved;
+    const count = key => s.lines.filter(l => l.list === key).length;
+    const toPayText = (tot, due) => tot <= 0 ? 'nothing due' : due < 0.005 ? 'all paid' : due < tot - 0.005 ? money(due, p.home) + ' to pay' : 'none paid yet';
+    const otherBig = v => twoCur && rate ? money(v * rate, p.other) : money(v, p.home);
 
     const tabs = [
-      ['other', otherName, money(s.other, p.home), 'dot-other'],
+      ['other', otherName, otherBig(s.other), 'dot-other'],
       ['home', 'Local', money(s.home, p.home), 'dot-home'],
-      ['soon', 'Due soon', `${soon.length} in 7 days`, 'dot-soon']
+      ['over', 'Overview', money(left, p.home), 'dot-over']
     ].map(([k, label, sub, dot]) => `<button type="button" role="tab" class="tab" id="tab-${k}" aria-controls="panel" aria-selected="${tab === k}" data-act="tab" data-tab="${k}"><span class="tab-l"><span class="dot ${dot}"></span><span>${esc(label)}</span></span><small>${esc(sub)}</small></button>`).join('');
+
+    // Total at the top of a list. The overseas list shows its own currency first, home currency under it.
+    const listHead = key => {
+      const tot = key === 'other' ? s.other : s.home, due = key === 'other' ? s.leftOther : s.leftHome, n = count(key);
+      const big = key === 'other' ? otherBig(tot) : money(tot, p.home);
+      const sub = (key === 'other' && twoCur && rate ? money(tot, p.home) + ' · ' : '') + `${n} cost${n === 1 ? '' : 's'} · ${toPayText(tot, due)}`;
+      const sentNote = key === 'other' && sent ? `<div class="sent-note"><span>Sent <b>${money(sent.amt, p.home)}</b>${twoCur && sent.rate ? ` (≈ ${money(sent.amt * sent.rate, p.other)})` : ''} on ${esc(shortDate(parse(sent.date)))}</span><button type="button" class="link" data-act="sent">Change</button></div>` : '';
+      return `<div class="sum"><div class="sum-t"><b class="sum-big">${big}</b><small>${esc(sub)}</small></div>${key === 'other' ? `<button type="button" class="btn sum-btn" data-act="sent">Money sent</button>` : ''}</div>${sentNote}`;
+    };
+
+    const overview = () => {
+      const lo = Math.max(left, 0);
+      const sv = moved ? Math.min(moved.amt, lo) : Math.min(Math.max(num(saveDraft || '0'), 0), lo);
+      const base = Math.max(s.income, s.costs);
+      if (base <= 0) return `<div class="empty"><b>Nothing to show yet</b><span>Add your pay and costs to see where your money goes.</span></div>`;
+      const segs = [
+        { n: otherName, v: s.other, c: 'var(--other)', sub: (twoCur && rate ? money(s.other * rate, p.other) + ' · ' : '') + `${count('other')} costs` },
+        { n: 'Local', v: s.home, c: 'var(--home-bar)', sub: `${count('home')} costs` },
+        { n: 'Savings', v: sv, c: 'var(--save)', sub: moved ? `moved ${shortDate(parse(moved.date))} ✓` : sv > 0 ? 'planned' : 'nothing yet' },
+        { n: 'Spare', v: lo - sv, c: 'var(--spare)', sub: 'for anything else this month' }
+      ];
+      const pd = segs.map(x => `<div class="pd"><i style="background:${x.c}"></i><span class="pd-n">${esc(x.n)}<small>${esc(x.sub)}</small></span><span class="pd-a">${money(x.v, p.home)}<small>${Math.round(x.v / base * 100)}%</small></span></div>`).join('');
+      const formula = `<p class="lo-f">Pay ${money(s.income, p.home)} − Local ${money(s.home, p.home)} − ${esc(otherName)} ${money(s.other, p.home)} = <b>${money(left, p.home)}</b></p>`;
+      let plan;
+      if (left <= 0) plan = `<div><h3>Over budget</h3>${formula}<p class="sub">Your costs this month are ${money(-left, p.home)} more than your pay.</p></div>`;
+      else if (moved) plan = `<div><h3>Leftover this month</h3>${formula}</div>
+        <div class="split" aria-hidden="true"><span style="width:${(sv / lo * 100).toFixed(1)}%;background:var(--save)"></span><span style="width:${((lo - sv) / lo * 100).toFixed(1)}%;background:var(--spare)"></span></div>
+        <div class="done-box"><span>Moved to savings on ${esc(shortDate(parse(moved.date)))} ✓</span><b>${money(moved.amt, p.home)}</b><span>Spare for the month: ${money(lo - sv, p.home)}</span><button type="button" class="link" data-act="unsave">Change</button></div>`;
+      else plan = `<div><h3>Leftover this month</h3>${formula}</div>
+        <div class="split" aria-hidden="true"><span style="width:${(sv / lo * 100).toFixed(1)}%;background:var(--save)"></span><span style="width:${((lo - sv) / lo * 100).toFixed(1)}%;background:var(--spare)"></span></div>
+        <div class="pots">
+          <label class="pot"><span><i style="background:var(--save)"></i>To savings</span><span class="prefix"><span>${esc(sym(p.home).trim())}</span><input class="num" id="save-amt" data-save inputmode="decimal" placeholder="0.00" value="${esc(saveDraft || '')}" aria-label="Amount to move to savings"></span></label>
+          <div class="pot"><span><i style="background:var(--spare)"></i>Spare</span><b id="spare-amt">${money(lo - sv, p.home)}</b></div>
+        </div>
+        <div class="chips"><button type="button" class="chip" data-act="saveq" data-q="0">None</button><button type="button" class="chip" data-act="saveq" data-q="0.5">Half</button><button type="button" class="chip" data-act="saveq" data-q="1">All</button></div>
+        <button type="button" class="btn" data-act="save-open"${sv > 0 ? '' : ' disabled'}>I moved ${money(sv, p.home)} to savings</button>`;
+      return `<div class="ov"><div class="ov-pie"><h3>Where your pay goes</h3>${pieSvg(segs, base, s.income > 0 ? 'Pay' : 'Costs', money(Math.round(s.income > 0 ? s.income : s.costs), p.home).replace(/\.00$/, ''))}<div class="pd-list">${pd}</div></div>${plan}</div>`;
+    };
 
     // One list's rows: the phone shows one at a time under the tabs, tablet and desktop show them side by side.
     const body = key => {
-    if (key === 'soon') {
-      return soon.length ? soon.map(({ d, it }) => {
-        const n = daysBetween(t, d), urgent = n <= 1;
-        return `<button type="button" class="row" data-act="edit" data-id="${it.id}" style="min-height:62px">
-          <span class="cal"><small class="${urgent ? 'urgent' : ''}">${DOW[d.getDay()]}</small><b>${d.getDate()}</b></span>
-          <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub ${urgent ? 'urgent' : ''}">${n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : 'In ' + n + ' days'}</span></span>
-          <span class="row-amt"><b>${money(it.amt, it.cur)}</b>${it.cur !== p.home && rate ? `<small>≈ ${money(it.amt / rate, p.home)}</small>` : ''}</span>
-        </button>`;
-      }).join('') + `<p class="hint">Everything due in the next 7 days, from both lists.</p>`
-        : `<div class="empty"><b>Nothing due this week</b><span>Costs due in the next 7 days show here.</span></div>`;
-    } else {
+      if (key === 'over') return overview();
       const list = S.items.filter(it => it.list === key).map(it => ({ it, nd: nextDue(it) }))
         .sort((a, b) => (a.nd ? a.nd.getTime() : 9e15) - (b.nd ? b.nd.getTime() : 9e15));
       const rows = list.map(({ it, nd }) => {
@@ -433,31 +464,28 @@
         </button></div>`;
       }).join('');
       const empty = `<div class="empty"><b>No ${key === 'other' ? esc(otherName) : 'local'} costs yet</b><span>${key === 'other' ? 'Money you send or pay in ' + esc(otherName) + ' — family allowance, loans, bills.' : 'Rent, groceries, phone, transport, bills.'}</span></div>`;
-      return (rows || empty) + `<button type="button" class="add-btn" data-act="add" data-list="${key}">${ICON.plus}Add a cost</button>`;
-    }
+      return listHead(key) + (rows || empty) + `<button type="button" class="add-btn" data-act="add" data-list="${key}">${ICON.plus}Add a cost</button>`;
     };
-    const cols = [
-      ['other', otherName, money(s.other, p.home) + ' this month' + (s.leftOther < s.other - 0.005 ? ` · ${money(s.leftOther, p.home)} to pay` : ''), 'dot-other'],
-      ['home', 'Local', money(s.home, p.home) + ' this month' + (s.leftHome < s.home - 0.005 ? ` · ${money(s.leftHome, p.home)} to pay` : ''), 'dot-home'],
-      ['soon', 'Due soon', 'next 7 days', 'dot-soon']
-    ].map(([k, label, sub, dot]) => `<section class="col col-${k}" aria-label="${esc(label)}"><header class="col-h"><span class="dot ${dot}"></span><h2>${esc(label)}</h2><small>${esc(sub)}</small></header><div class="col-b">${body(k)}</div></section>`).join('');
+    const cols = [['other', otherName, 'dot-other'], ['home', 'Local', 'dot-home'], ['over', 'Overview', 'dot-over']]
+      .map(([k, label, dot]) => `<section class="col col-${k}" aria-label="${esc(label)}"><header class="col-h"><span class="dot ${dot}"></span><h2>${esc(label)}</h2></header><div class="col-b">${body(k)}</div></section>`).join('');
 
+    const tileSub = (tot, due, extra) => extra || toPayText(tot, due);
     return `<div class="wrap">
       <header class="top">
         <div class="logo" aria-hidden="true">${ICON.logo}</div>
-        <div class="top-name"><span class="eyebrow">BudgetWise</span><span class="hello">Hi, ${esc(p.name)}</span></div>
+        <div class="top-name"><span class="eyebrow">PisoWise</span><span class="hello">Hi, ${esc(p.name)}</span></div>
         ${rateBtnHtml()}
       </header>
       <section class="hero" aria-label="This month">
         <div class="hero-top">
-          <div><div class="hero-label">${saveLabel} · ${MON_LONG[t.getMonth()]}</div><div class="hero-amt${s.saved < 0 ? ' neg' : ''}">${money(Math.abs(s.saved), p.home)}</div></div>
-          <span class="badge">${badge}</span>
+          <div><div class="hero-label">${left >= 0 ? 'Leftover' : 'Over budget'} · ${MON_LONG[t.getMonth()]}</div><div class="hero-amt${left < 0 ? ' neg' : ''}">${money(Math.abs(left), p.home)}</div></div>
+          <span class="badge">${np ? `Next pay ${np.getDate()} ${MON[np.getMonth()]}` : 'no payday'}</span>
         </div>
-        <div class="bar" aria-hidden="true"><span style="width:${pct(s.other)};background:var(--other-bar)"></span><span style="width:${pct(s.home)};background:var(--home-bar)"></span></div>
+        <div class="bar" aria-hidden="true"><span style="width:${pct(s.other)};background:var(--other-bar)"></span><span style="width:${pct(s.home)};background:var(--home-bar)"></span>${moved ? `<span style="width:${pct(moved.amt)};background:var(--save-bar)"></span>` : ''}</div>
         <div class="hero-grid">
           <button type="button" class="pay-btn" data-act="pay" aria-label="Income ${esc(money(s.income, p.home))}. Change this month's pay."><small>Income ${ICON.pen}</small><b>${money(s.income, p.home)}</b><small class="${s.extra || s.payChanged ? 'accent' : ''}">${s.extra ? '+' + money(s.extra, p.home) + ' extra' : s.payChanged ? 'pay changed' : `${s.pays} payday${s.pays === 1 ? '' : 's'}`}</small></button>
-          <div><small>Costs</small><b>${money(s.costs, p.home)}</b><small${s.costs > 0 && s.left < 0.005 ? ' class="accent"' : ''}>${s.costs <= 0 ? 'both lists' : s.left < 0.005 ? 'all paid' : s.left < s.costs - 0.005 ? money(s.left, p.home) + ' to pay' : 'none paid yet'}</small></div>
-          <div><small>Next pay</small><b>${np ? shortDate(np) : '—'}</b><small class="accent">${np ? inDays(daysBetween(t, np)) : ''}</small></div>
+          <div><small>Local</small><b>${money(s.home, p.home)}</b><small${s.home > 0 && s.leftHome < 0.005 ? ' class="accent"' : ''}>${tileSub(s.home, s.leftHome)}</small></div>
+          <div><small>${esc(otherName)}</small><b>${money(s.other, p.home)}</b><small${sent || (s.other > 0 && s.leftOther < 0.005) ? ' class="accent"' : ''}>${tileSub(s.other, s.leftOther, sent ? 'sent ✓' : '')}</small></div>
         </div>
         ${s.missing ? `<div class="hero-note">Some ${esc(otherName)} costs aren't counted yet — no exchange rate. Tap the rate button or set one in Setup.</div>` : ''}
       </section>
@@ -467,10 +495,93 @@
     </div>${navHtml()}`;
   }
 
+  // Ring chart: each slice's share of base. Slice colours come from the theme.
+  function pieSvg(segs, base, label, value) {
+    const R = 52, C = 2 * Math.PI * R;
+    let off = 0;
+    const arcs = segs.filter(x => x.v > 0.005).map(x => {
+      const len = Math.min(x.v / base, 1) * C;
+      const a = `<circle cx="70" cy="70" r="${R}" fill="none" style="stroke:${x.c}" stroke-width="22" stroke-dasharray="${Math.max(len - 1.5, 0.5).toFixed(2)} ${C.toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 70 70)"/>`;
+      off += len;
+      return a;
+    }).join('');
+    return `<svg class="pie" viewBox="0 0 140 140" width="168" height="168" role="img" aria-label="${esc(label + ' ' + value + ': ' + segs.map(x => x.n + ' ' + Math.round(x.v / base * 100) + '%').join(', '))}"><circle cx="70" cy="70" r="${R}" fill="none" style="stroke:var(--line2)" stroke-width="22"/>${arcs}<text x="70" y="64" text-anchor="middle" class="pie-l">${esc(label)}</text><text x="70" y="83" text-anchor="middle" class="pie-v">${esc(value)}</text></svg>`;
+  }
+
+  // ---------- money sent + savings dialogs ----------
+  // dlg: { kind: 'sent', amt: string, tick: bool } or { kind: 'save', amt: number, done: bool }
+  function otherOpen(mk) {
+    const f = keyToDate(mk), out = [];
+    for (const it of S.items) if (it.list === 'other') for (const d of occurrences(it, f, monthEnd(f))) if (!isPaid(it, d)) out.push({ it, k: ymd(d) });
+    return out;
+  }
+  function openSent() {
+    const t = today(), mk = monthKey(t), s = summary(new Date(t.getFullYear(), t.getMonth(), 1), monthEnd(t)), cur = (S.sent || {})[mk];
+    dlg = { kind: 'sent', amt: cur ? String(cur.amt) : (s.other > 0 ? (Math.round(s.other * 100) / 100).toFixed(2) : ''), tick: true };
+    renderDlg();
+  }
+  function sentConv() {
+    const p = S.profile, rate = rateValue(), t = today(), s = summary(new Date(t.getFullYear(), t.getMonth(), 1), monthEnd(t));
+    if (p.home === p.other || !rate) return '';
+    const v = num(dlg.amt) * rate, need = s.other * rate, diff = v - need;
+    return `≈ <b>${money(v, p.other)}</b> at ${sym(p.other).trim()}${rate.toFixed(2)} · this month's list ${money(need, p.other)}<br>${!(num(dlg.amt) > 0) ? '' : Math.abs(diff) < 1 ? 'Covers the whole list.' : diff > 0 ? money(diff, p.other) + ' more than the list.' : money(-diff, p.other) + ' less than the list.'}`;
+  }
+  function renderDlg() {
+    const p = S.profile, t = today(), mk = monthKey(t), otherName = CUR[p.other].country;
+    if (dlg.kind === 'sent') {
+      const open = otherOpen(mk), had = (S.sent || {})[mk];
+      $modal.innerHTML = `<div class="overlay" data-act="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
+        <div class="dlg-head"><h2 id="dlg-t">Money sent to ${esc(otherName)}</h2><span class="pill pill-other">${MON_LONG[t.getMonth()]}</span></div>
+        <label class="fld"><span>Amount sent</span><span class="prefix"><span>${esc(sym(p.home).trim())}</span><input class="num" id="sent-amt" inputmode="decimal" value="${esc(dlg.amt)}" placeholder="0.00"></span>
+          <small id="sent-conv">${sentConv()}</small></label>
+        ${open.length ? `<label class="chk chk-box"><input type="checkbox" id="sent-tick"${dlg.tick ? ' checked' : ''}><span>Tick all ${open.length} unpaid ${esc(otherName)} cost${open.length === 1 ? '' : 's'} for ${MON_LONG[t.getMonth()]} as paid<small>Local costs are not changed.</small></span></label>`
+          : `<p class="sub">Every ${esc(otherName)} cost this month is already ticked.</p>`}
+        <p class="err" id="dlg-err" hidden></p>
+        <div class="dlg-actions">${had ? '<button type="button" class="btn-ghost" data-act="sent-del">Remove</button>' : ''}<button type="button" class="btn-ghost" data-act="cancel">Cancel</button><button type="button" class="btn" data-act="sent-save">Save</button></div>
+      </div></div>`;
+    } else {
+      $modal.innerHTML = `<div class="overlay" data-act="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
+        <div class="dlg-head"><h2 id="dlg-t">Confirm savings</h2></div>
+        <p class="sub" style="font-size:15px;color:var(--ink2)">Have you moved <b>${money(dlg.amt, p.home)}</b> to your savings account?</p>
+        <label class="chk chk-box"><input type="checkbox" id="save-done"${dlg.done ? ' checked' : ''}><span>Yes, the transfer is done</span></label>
+        <div class="dlg-actions"><button type="button" class="btn-ghost" data-act="cancel">Not yet</button><button type="button" class="btn" data-act="save-ok"${dlg.done ? '' : ' disabled'}>Confirm</button></div>
+      </div></div>`;
+    }
+  }
+  function closeDlg() { dlg = null; $modal.innerHTML = ''; }
+  function saveSent() {
+    const amt = Math.round(num(dlg.amt) * 100) / 100, err = document.getElementById('dlg-err');
+    if (!(amt > 0)) { err.textContent = 'Please enter the amount you sent.'; err.hidden = false; return; }
+    const t = today(), mk = monthKey(t), prevSent = (S.sent || {})[mk];
+    const ticked = dlg.tick ? otherOpen(mk) : [];
+    if (!S.sent) S.sent = {};
+    S.sent[mk] = { amt, date: ymd(t), rate: rateValue() || null };
+    for (const { it, k } of ticked) it.paid = (it.paid || []).concat(k);
+    save(); closeDlg(); render();
+    toast(ticked.length ? `Saved · ${ticked.length} cost${ticked.length === 1 ? '' : 's'} ticked` : 'Money sent saved', { label: 'Undo', run: () => {
+      if (prevSent) S.sent[mk] = prevSent; else delete S.sent[mk];
+      for (const { it, k } of ticked) it.paid = (it.paid || []).filter(x => x !== k);
+      save(); render();
+    } });
+  }
+  function saveQuick(q) {
+    const t = today(), s = summary(new Date(t.getFullYear(), t.getMonth(), 1), monthEnd(t)), lo = Math.max(s.saved, 0);
+    saveDraft = q <= 0 ? '' : (Math.floor(lo * q * 100) / 100).toFixed(2);
+    render();
+  }
+  function confirmSave() {
+    const t = today(), mk = monthKey(t);
+    if (!S.savings) S.savings = {};
+    S.savings[mk] = { amt: dlg.amt, date: ymd(t) };
+    saveDraft = null;
+    save(); closeDlg(); render();
+    toast('Savings recorded');
+  }
+
   function historyHtml() {
     const p = S.profile, t = today(), cur = monthKey(t);
     const live = summary(new Date(t.getFullYear(), t.getMonth(), 1), monthEnd(t));
-    const months = [{ key: cur, live: true, pays: live.pays, income: live.income, salary: p.salary, payLines: live.payLines, other: live.other, home: live.home, saved: live.saved, rate: rateValue(), homeCur: p.home, otherCur: p.other, lines: live.lines }]
+    const months = [{ key: cur, live: true, pays: live.pays, income: live.income, salary: p.salary, payLines: live.payLines, other: live.other, home: live.home, saved: live.saved, rate: rateValue(), homeCur: p.home, otherCur: p.other, lines: live.lines, sent: ((S.sent || {})[cur] || {}).amt || 0, moved: ((S.savings || {})[cur] || {}).amt || 0 }]
       .concat(Object.keys(S.history).filter(k => k < cur).sort().reverse().map(k => Object.assign({ key: k }, S.history[k])));
     const first = months[months.length - 1].key;
     const total = months.reduce((a, m) => a + m.saved, 0);
@@ -500,6 +611,8 @@
           <div><span class="lst"><span class="dot dot-other"></span>${esc(otherLabel)}</span><span>${money(m.other, m.homeCur)}</span></div>${lines('other')}
           <div><span class="lst"><span class="dot dot-home"></span>Local</span><span>${money(m.home, m.homeCur)}</span></div>${lines('home')}
           ${m.otherCur !== m.homeCur ? `<div><span class="k">Rate used</span><span>${m.rate ? `${sym(m.homeCur)}1 = ${sym(m.otherCur)}${m.rate.toFixed(2)}` : 'none'}</span></div>` : ''}
+          ${m.sent ? `<div><span class="k">Sent to ${esc(otherLabel)}</span><span>${money(m.sent, m.homeCur)}</span></div>` : ''}
+          ${m.moved ? `<div><span class="k">Moved to savings</span><span>${money(m.moved, m.homeCur)}</span></div>` : ''}
           <div><span class="k">Saved</span><b>${m.income > 0 ? Math.round(m.saved / m.income * 100) + '% of income' : '—'}</b></div>
         </div>` : ''}
       </div>`;
@@ -545,7 +658,7 @@
     const rmode = manual ? 'own' : p.margin ? 'margin' : 'market';
     const market = S.profile && S.rate && !S.rate.manual && S.rate.pair === pairKey() ? S.rate.value : null;
     const head = first
-      ? `<div class="welcome"><div class="brand"><div class="logo" aria-hidden="true">${ICON.logo}</div>BudgetWise</div><h1 id="setup-first">Set up your budget</h1><p>Takes a minute. It's saved to your account, so you can open it on any phone or computer.</p></div>`
+      ? `<div class="welcome"><div class="brand"><div class="logo" aria-hidden="true">${ICON.logo}</div><span>Piso<span class="wm-a">Wise</span></span></div><h1 id="setup-first">Set up your budget</h1><p>Takes a minute. It's saved to your account, so you can open it on any phone or computer.</p></div>`
       : `<h1 class="page">Setup</h1>`;
     return `<div class="wrap narrow${first ? ' first' : ''}">
       ${head}
@@ -621,10 +734,10 @@
     const btn = { in: 'Sign in', up: 'Create account', forgot: 'Send reset link', reset: 'Save new password' }[m];
     const links = m === 'in' ? `<button type="button" class="link" data-act="auth-mode" data-mode="forgot">Forgot password?</button><span>New here? <button type="button" class="link" data-act="auth-mode" data-mode="up">Create an account</button></span>`
       : m === 'reset' ? '' : `<span>${m === 'up' ? 'Already have an account?' : ''} <button type="button" class="link" data-act="auth-mode" data-mode="in">${m === 'up' ? 'Sign in' : 'Back to sign in'}</button></span>`;
-    const note = !Cloud.configured() ? `<p class="err">Accounts aren't switched on yet for this copy of BudgetWise.</p>`
+    const note = !Cloud.configured() ? `<p class="err">Accounts aren't switched on yet for this copy of PisoWise.</p>`
       : authMsg ? `<p class="${authMsg.ok ? 'note-ok' : 'err'}" role="alert">${esc(authMsg.text)}</p>` : '';
     return `<div class="wrap narrow first auth">
-      <div class="welcome"><div class="brand"><div class="logo" aria-hidden="true">${ICON.logo}</div>BudgetWise</div><h1>${t[0]}</h1><p>${t[1]}</p></div>
+      <div class="welcome"><div class="brand"><div class="logo" aria-hidden="true">${ICON.logo}</div><span>Piso<span class="wm-a">Wise</span></span></div><h1>${t[0]}</h1><p>${t[1]}</p></div>
       <form class="setup" id="auth" novalidate>
         ${fields}
         ${note}
@@ -947,13 +1060,13 @@
     const blob = new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `budgetwise-backup-${ymd(today())}.json`;
+    a.download = `pisowise-backup-${ymd(today())}.json`;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     toast('Backup saved to your downloads');
   }
-  // A cost list (kind: 'budgetwise-costs') adds to the budget instead of replacing it.
+  // A cost list (kind: 'pisowise-costs', or the older 'budgetwise-costs') adds to the budget instead of replacing it.
   function importCosts(list) {
     const p = S.profile, t = ymd(today());
     const REPS = REPEATS.map(r => r[0]);
@@ -979,7 +1092,7 @@
     r.onload = () => {
       try {
         const s = JSON.parse(r.result);
-        if (s && s.kind === 'budgetwise-costs' && Array.isArray(s.items)) return importCosts(s.items);
+        if (s && (s.kind === 'pisowise-costs' || s.kind === 'budgetwise-costs') && Array.isArray(s.items)) return importCosts(s.items);
         if (!s || s.v !== 1 || !s.profile || !Array.isArray(s.items)) throw new Error('bad');
         S = Object.assign(blank(), s);
         save();
@@ -987,7 +1100,7 @@
         view = 'home';
         render();
         toast('Backup restored');
-      } catch (e) { toast('That file is not a BudgetWise backup'); }
+      } catch (e) { toast('That file is not a PisoWise backup'); }
     };
     r.readAsText(file);
   }
@@ -1003,6 +1116,10 @@
     else if (act === 'add') openEditor(null, b.dataset.list);
     else if (act === 'paid') togglePaid(+b.dataset.id);
     else if (act === 'pay') openPay();
+    else if (act === 'sent') openSent();
+    else if (act === 'saveq') saveQuick(+b.dataset.q);
+    else if (act === 'save-open') { const lo = Math.max(summary(new Date(today().getFullYear(), today().getMonth(), 1), monthEnd(today())).saved, 0), v = Math.min(Math.round(num(saveDraft || '0') * 100) / 100, lo); if (v > 0) { dlg = { kind: 'save', amt: v, done: false }; renderDlg(); } }
+    else if (act === 'unsave') { const mk = monthKey(today()), was = S.savings[mk]; delete S.savings[mk]; saveDraft = String(was.amt); save(); render(); toast('Savings unmarked', { label: 'Undo', run: () => { S.savings[mk] = was; saveDraft = null; save(); render(); } }); }
     else if (act === 'edit') { const it = S.items.find(x => x.id === +b.dataset.id); if (it) openEditor(it); }
     else if (act === 'month') { openMonth = openMonth === b.dataset.key && b.classList.contains('month-btn') ? '-' : b.dataset.key; render(); }
     else if (act === 'ratemode') { document.querySelector('#setup [name="ratemode"]').value = b.dataset.mode; syncSetup(); }
@@ -1020,7 +1137,17 @@
       view = 'setup'; render();
     }
   });
-  $app.addEventListener('input', e => { if (e.target.closest('#setup')) syncSetup(); });
+  $app.addEventListener('input', e => {
+    if (e.target.id === 'save-amt') {
+      saveDraft = e.target.value;
+      const pos = e.target.selectionStart, y = window.scrollY;
+      render();
+      document.querySelectorAll('#save-amt').forEach(i => { if (i.offsetParent) { i.focus(); try { i.setSelectionRange(pos, pos); } catch (err) { /* ignore */ } } });
+      window.scrollTo(0, y);
+      return;
+    }
+    if (e.target.closest('#setup')) syncSetup();
+  });
   $app.addEventListener('change', e => {
     if (e.target.matches('[data-act="restore"]') && e.target.files[0]) restore(e.target.files[0]);
     else if (e.target.closest('#setup')) syncSetup();
@@ -1028,6 +1155,17 @@
   $app.addEventListener('submit', e => { e.preventDefault(); if (e.target.id === 'auth') { if (!authBusy) submitAuth(); } else submitSetup(); });
 
   $modal.addEventListener('click', e => {
+    if (dlg) {
+      if (e.target.matches('[data-act="scrim"]')) return closeDlg();
+      const b = e.target.closest('[data-act]');
+      if (!b || b.disabled) return;
+      const act = b.dataset.act;
+      if (act === 'cancel') closeDlg();
+      else if (act === 'sent-save') saveSent();
+      else if (act === 'sent-del') { const mk = monthKey(today()), was = S.sent[mk]; delete S.sent[mk]; save(); closeDlg(); render(); toast('Money sent removed', { label: 'Undo', run: () => { S.sent[mk] = was; save(); render(); } }); }
+      else if (act === 'save-ok') confirmSave();
+      return;
+    }
     if (payDraft) {
       if (e.target.matches('[data-act="scrim"]')) return closePay();
       const b = e.target.closest('[data-act]');
@@ -1060,6 +1198,10 @@
     else if (act === 'rep') { draft.rep = b.dataset.rep; renderEditor(); }
   });
   $modal.addEventListener('input', e => {
+    if (dlg) {
+      if (e.target.id === 'sent-amt') { dlg.amt = e.target.value; const c = document.getElementById('sent-conv'); if (c) c.innerHTML = sentConv(); }
+      return;
+    }
     if (payDraft) {
       const t = e.target, ds = t.dataset;
       if (ds.pay != null) payDraft.pays[+ds.pay].amt = t.value;
@@ -1078,6 +1220,11 @@
     updateEditorTexts();
   });
   $modal.addEventListener('change', e => {
+    if (dlg) {
+      if (e.target.id === 'sent-tick') dlg.tick = e.target.checked;
+      if (e.target.id === 'save-done') { dlg.done = e.target.checked; const ok = document.querySelector('[data-act="save-ok"]'); if (ok) ok.disabled = !dlg.done; }
+      return;
+    }
     if (!draft) return;
     if (e.target.id === 'd-due') { draft.due = e.target.value; updateEditorTexts(); }
     if (e.target.id === 'd-debt') {
@@ -1087,12 +1234,12 @@
       if (l) l.focus();
     }
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (draft) closeEditor(); else if (payDraft) closePay(); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (dlg) closeDlg(); else if (draft) closeEditor(); else if (payDraft) closePay(); } });
   document.addEventListener('visibilitychange', () => {
     if (!Cloud.user) return;
     if (document.visibilityState === 'hidden') { if (meta.dirty) push(); return; }
     rollover();
-    if (!draft && !payDraft && view !== 'setup' && view !== 'auth') render();
+    if (!draft && !payDraft && !dlg && view !== 'setup' && view !== 'auth') render();
     pull().then(() => refreshRate(false));
   });
   window.addEventListener('online', () => { if (Cloud.user) { if (meta.dirty) push(); else pull(); } });
