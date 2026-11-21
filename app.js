@@ -704,7 +704,7 @@
           <small>Your two lists and the exchange rate follow these.</small>
         </div>
         <label class="fld"><span>Usual salary each payday (after tax)</span>
-          <span class="prefix"><span id="sal-sym">${esc(sym(p.home).trim())}</span><input name="salary" inputmode="decimal" value="${p.salary ? esc(Number(p.salary).toFixed(2)) : ''}" placeholder="0.00" autocomplete="off" required></span>
+          <span class="prefix"><span id="sal-sym">${esc(sym(p.home).trim())}</span><input name="salary" inputmode="decimal" value="${p.salary !== '' && p.salary != null ? esc(Number(p.salary).toFixed(2)) : ''}" placeholder="0.00" autocomplete="off"></span>
           <small>Pay changes some months — a bonus, overtime, fewer hours? Tap Income on the Budget page to change any month.</small>
         </label>
         <fieldset class="fld" style="border:0;margin:0;padding:0">
@@ -846,7 +846,7 @@
     if (!f) return null;
     const v = n => f.elements[n] ? f.elements[n].value : '';
     return {
-      name: v('name').trim(), home: v('home'), other: v('other'), salary: num(v('salary')),
+      name: v('name').trim(), home: v('home'), other: v('other'), salary: num(v('salary')), salaryTyped: hasNum(v('salary')),
       freq: v('freq'), last: v('last'), nth: +v('nth'), wd: +v('wd'),
       ratemode: v('ratemode') || 'market', manual: v('ratemode') === 'own', margin: num(v('margin')), rate: num(v('rate'))
     };
@@ -883,10 +883,10 @@
     const p = readSetup(), err = document.getElementById('setup-err');
     const fail = m => { err.textContent = m; err.hidden = false; };
     if (!p.name) return fail('Please enter your name.');
-    if (!(p.salary > 0)) return fail('Please enter your salary for each payday.');
+    if (!p.salaryTyped) return fail('Please enter your salary for each payday (0 is fine if it changes every month).');
     if (p.freq !== 'custom' && !p.last) return fail('Please pick your last payday.');
     if (p.manual && !(p.rate > 0)) return fail('Please enter your exchange rate, or pick Market rate.');
-    if (p.ratemode === 'margin' && !(p.margin > 0)) return fail('Please enter the margin, or pick Market rate.');
+    if (p.ratemode === 'margin' && !(p.margin >= 0)) return fail('Please enter the margin, or pick Market rate.');
     const first = !S.profile, old = S.profile;
     S.profile = { name: p.name, home: p.home, other: p.other, salary: p.salary, freq: p.freq, last: p.last || ymd(today()), nth: p.nth, wd: p.wd, margin: p.ratemode === 'margin' ? p.margin : 0 };
     if (old) {
