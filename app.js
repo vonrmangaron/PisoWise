@@ -20,7 +20,7 @@
     ['NGN', 'Nigeria', '₦', 0], ['KES', 'Kenya', 'KSh ', 0], ['BRL', 'Brazil', 'R$', 2], ['MXN', 'Mexico', 'MX$', 2]
   ];
   const CUR = Object.fromEntries(CURRENCIES.map(([code, country, sym, dec]) => [code, { code, country, sym, dec }]));
-  const REPEATS = [['once', 'Once'], ['week', 'Weekly'], ['fortnight', 'Fortnightly'], ['month', 'Monthly'], ['quarter', 'Every 3 months'], ['year', 'Yearly']];
+  const REPEATS = [['once', 'Once'], ['week', 'Weekly'], ['fortnight', 'Fortnightly'], ['month', 'Monthly'], ['quarter', 'Every 3 months'], ['year', 'Yearly'], ['every', 'Every … months']];
   const REP = Object.fromEntries(REPEATS);
   const FREQS = [['week', 'Weekly', 'Every 7 days'], ['fortnight', 'Fortnightly', 'Every 14 days'], ['month', 'Monthly', 'Same date'], ['custom', 'Custom', 'e.g. 3rd Friday']];
   const FREQ_LABEL = { week: 'week', fortnight: 'fortnight', month: 'month', custom: 'payday' };
@@ -194,10 +194,13 @@
   }
 
   // ---------- dates ----------
-  function step(a, rep, k) {
+  // Months between repeats; 'every' uses the cost's own number (every 2 months, every 6 months…).
+  const everyN = it => Math.min(24, Math.max(2, Math.floor(num(it.every)) || 2));
+  const unitDays = it => it.rep === 'every' ? 30.44 * everyN(it) : UNIT[it.rep];
+  function step(a, rep, k, every) {
     if (rep === 'week') return addDays(a, 7 * k);
     if (rep === 'fortnight') return addDays(a, 14 * k);
-    const mm = { month: 1, quarter: 3, year: 12 }[rep];
+    const mm = rep === 'every' ? every : { month: 1, quarter: 3, year: 12 }[rep];
     const t = new Date(a.getFullYear(), a.getMonth() + mm * k, 1);
     return new Date(t.getFullYear(), t.getMonth(), Math.min(a.getDate(), monthEnd(t).getDate()));
   }
@@ -209,13 +212,16 @@
     const lo = from > floor ? from : floor;
     if (it.rep === 'once') { if (a >= lo && a <= to) out.push(a); return out; }
     const kmax = isDebt(it) ? it.left - 1 : Infinity;
-    for (let k = Math.floor(daysBetween(a, lo) / UNIT[it.rep]) - 2; k <= kmax; k++) {
-      const d = step(a, it.rep, k);
+    for (let k = Math.floor(daysBetween(a, lo) / unitDays(it)) - 2; k <= kmax; k++) {
+      const d = step(a, it.rep, k, everyN(it));
       if (d > to) break;
       if (d >= lo) out.push(d);
     }
     return out;
   }
+  // Counted in a month: optional costs are left out unless switched on for that month;
+  // any cost can be left out of one month (it.count['YYYY-MM'] = true/false overrides the default).
+  const counted = (it, mk) => it.count && mk in it.count ? !!it.count[mk] : !it.optional;
   // Paid ticks: the due dates already paid (ymd strings).
   const isPaid = (it, d) => !!(it.paid && it.paid.includes(ymd(d)));
   // The month shown on the Budget screen, its first and last day, and the rate to use for it
@@ -230,8 +236,8 @@
     if (!isDebt(it)) return null;
     const a = parse(it.due), t = today();
     let remaining = 0;
-    for (let k = 0; k < it.left; k++) if (step(a, it.rep, k) >= t) remaining++;
-    return { remaining, end: step(a, it.rep, it.left - 1), toGo: remaining * it.amt };
+    for (let k = 0; k < it.left; k++) if (step(a, it.rep, k, everyN(it)) >= t) remaining++;
+    return { remaining, end: step(a, it.rep, it.left - 1, everyN(it)), toGo: remaining * it.amt };
   }
   function nthWeekday(y, m, nth, wd) {
     if (nth === 5) { const d = new Date(y, m + 1, 0); while (d.getDay() !== wd) d.setDate(d.getDate() - 1); return d; }
@@ -301,7 +307,7 @@
     const t = { other: 0, home: 0 }, due = { other: 0, home: 0 }, lines = [];
     let missing = false;
     for (const it of S.items) {
-      const occ = occurrences(it, from, to), n = occ.length;
+      const occ = occurrences(it, from, to).filter(d => counted(it, monthKey(d))), n = occ.length;
       if (!n) continue;
       const v = toHome(it.amt, it.cur, rate);
       if (v == null) { missing = true; continue; }
@@ -391,6 +397,7 @@
     if (it.rep === 'once') return 'Once · ' + shortDate(a);
     if (it.rep === 'week' || it.rep === 'fortnight') return `${REP[it.rep]} · ${DOW[a.getDay()]}`;
     if (it.rep === 'month') return 'Monthly · ' + ord(a.getDate());
+    if (it.rep === 'every') return `Every ${everyN(it)} months · ${a.getDate()} ${MON[a.getMonth()]}`;
     return `${REP[it.rep]} · ${a.getDate()} ${MON[a.getMonth()]}`;
   }
 
@@ -417,7 +424,8 @@
     const listHead = key => {
       const tot = key === 'other' ? s.other : s.home, due = key === 'other' ? s.leftOther : s.leftHome, n = count(key);
       const big = key === 'other' ? otherBig(tot) : money(tot, p.home);
-      const sub = (key === 'other' && twoCur && rate ? money(tot, p.home) + ' · ' : '') + `${n} cost${n === 1 ? '' : 's'} · ${toPayText(tot, due)}`;
+      const nOff = S.items.filter(it => it.list === key && !counted(it, mk) && occurrences(it, from, to).length).length;
+      const sub = (key === 'other' && twoCur && rate ? money(tot, p.home) + ' · ' : '') + `${n} cost${n === 1 ? '' : 's'} · ${toPayText(tot, due)}${nOff ? ` · ${nOff} not counted` : ''}`;
       const sentNote = key === 'other' && sent ? `<div class="sent-note"><span>Sent <b>${money(sent.amt, p.home)}</b>${twoCur && sent.rate ? ` (≈ ${money(sent.amt * sent.rate, p.other)})` : ''} on ${esc(shortDate(parse(sent.date)))}</span><button type="button" class="link" data-act="sent">Change</button></div>` : '';
       return `<div class="sum"><div class="sum-t"><b class="sum-big">${big}</b><small>${esc(sub)}</small></div>${key === 'other' ? `<button type="button" class="btn sum-btn" data-act="sent">Money sent</button>` : ''}</div>${sentNote}`;
     };
@@ -455,9 +463,15 @@
     const body = key => {
       if (key === 'over') return overview();
       const list = S.items.filter(it => it.list === key && (isNow || occurrences(it, from, to).length)).map(it => ({ it, nd: isNow ? nextDue(it) : occurrences(it, from, to).find(d => !isPaid(it, d)) || null }))
-        .sort((a, b) => (a.nd ? a.nd.getTime() : 9e15) - (b.nd ? b.nd.getTime() : 9e15));
-      const rows = list.map(({ it, nd }) => {
+        .map(x => Object.assign(x, { off: !counted(x.it, mk) && occurrences(x.it, from, to).length > 0 }))
+        .sort((a, b) => (a.off - b.off) || ((a.nd ? a.nd.getTime() : 9e15) - (b.nd ? b.nd.getTime() : 9e15)));
+      const offList = list.filter(x => x.off);
+      const rowHtml = ({ it, nd, off }) => {
         const occ = occurrences(it, from, to), n = occ.length, dd = nd ? daysBetween(t, nd) : null, ds = debtState(it);
+        const sw = n ? `<button type="button" class="sw${off ? '' : ' on'}" data-act="count" data-id="${it.id}" role="switch" aria-checked="${!off}" aria-label="Count ${esc(it.name)} in ${esc(MON_LONG[mon])}" title="${off ? 'Not counted in ' : 'Counted in '}${esc(MON_LONG[mon])}"><i></i></button>` : '';
+        if (off) return `<div class="row-w is-off"><span class="tick none" aria-hidden="true"></span><button type="button" class="row has-tick" data-act="edit" data-id="${it.id}">
+          <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${esc(dueDesc(it))}</span>${it.optional ? '<span class="tag-opt">Optional</span>' : ''}</span>
+          <span class="row-amt"><b>${money(it.amt * n, it.cur)}</b><small class="due">not counted</small></span></button>${sw}</div>`;
         const np = occ.filter(d => isPaid(it, d)).length, allPaid = n > 0 && np === n;
         const ini = `<span class="ini ini-${it.list}" aria-hidden="true">${esc((it.name.trim()[0] || '?').toUpperCase())}</span>`;
         const tick = n ? `<button type="button" class="tick${allPaid ? ' on' : np ? ' part' : ''}" data-act="paid" data-id="${it.id}" aria-pressed="${allPaid}" aria-label="${esc(it.name)}: ${allPaid ? 'paid this month. Tap to undo.' : 'mark as paid'}${n > 1 ? ` (${np} of ${n} paid)` : ''}">${allPaid ? ICON.check : np ? `<small>${np}/${n}</small>` : ICON.check}</button>` : '';
@@ -468,10 +482,13 @@
         const debtTag = ds ? `<span class="tag-debt">${ds.remaining ? `${ds.remaining} left · ends ${MON[ds.end.getMonth()]} ${ds.end.getFullYear()}` : 'Paid off'}</span>` : '';
         return `<div class="row-w${allPaid ? ' is-paid' : ''}">${tick}<button type="button" class="row${nd || n ? '' : ' done'}${tick ? ' has-tick' : ''}" data-act="edit" data-id="${it.id}">
           ${tick ? '' : ini}
-          <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${esc(dueDesc(it))}${n > 1 ? ` · ${n}× this month` : ''}</span>${debtTag}</span>
+          <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${esc(dueDesc(it))}${n > 1 ? ` · ${n}× this month` : ''}</span>${debtTag}${it.optional ? '<span class="tag-opt">Optional</span>' : ''}</span>
           <span class="row-amt"><b>${money(it.amt, it.cur)}</b>${conv}${status}</span>
-        </button></div>`;
-      }).join('');
+        </button>${sw}</div>`;
+      };
+      const offTotal = offList.reduce((a, { it }) => a + (toHome(it.amt, it.cur, rate) || 0) * occurrences(it, from, to).length, 0);
+      const rows = list.filter(x => !x.off).map(rowHtml).join('')
+        + (offList.length ? `<div class="grp-off">Not counted in ${esc(MON_LONG[mon])} · ${money(offTotal, p.home)}</div>` + offList.map(rowHtml).join('') : '');
       const empty = `<div class="empty"><b>No ${key === 'other' ? esc(otherName) : 'local'} costs yet</b><span>${key === 'other' ? 'Money you send or pay in ' + esc(otherName) + ' — family allowance, loans, bills.' : 'Rent, groceries, phone, transport, bills.'}</span></div>`;
       return listHead(key) + (rows || empty) + `<button type="button" class="add-btn" data-act="add" data-list="${key}">${ICON.plus}Add a cost</button>`;
     };
@@ -526,7 +543,7 @@
   // dlg: { kind: 'sent', amt: string, tick: bool } or { kind: 'save', amt: number, done: bool }
   function otherOpen(mk) {
     const f = keyToDate(mk), out = [];
-    for (const it of S.items) if (it.list === 'other') for (const d of occurrences(it, f, monthEnd(f))) if (!isPaid(it, d)) out.push({ it, k: ymd(d) });
+    for (const it of S.items) if (it.list === 'other') if (counted(it, mk)) for (const d of occurrences(it, f, monthEnd(f))) if (!isPaid(it, d)) out.push({ it, k: ymd(d) });
     return out;
   }
   function openSent() {
@@ -893,8 +910,8 @@
   // ---------- cost editor ----------
   function openEditor(it, list) {
     const p = S.profile;
-    draft = it ? Object.assign({}, it, { amt: String(it.amt), left: it.left ? String(it.left) : '' })
-      : { id: null, list, name: '', amt: '', cur: list === 'home' ? p.home : p.other, rep: 'month', due: ymd(today()), left: '' };
+    draft = it ? Object.assign({}, it, { amt: String(it.amt), left: it.left ? String(it.left) : '', every: String(it.every || 2), optional: !!it.optional, countNow: counted(it, vm()) })
+      : { id: null, list, name: '', amt: '', cur: list === 'home' ? p.home : p.other, rep: 'month', every: '2', due: ymd(vm() === monthKey(today()) ? today() : vmFrom()), left: '', optional: false, countNow: true };
     clearTimeout(toastTimer);
     $toast.hidden = true;
     renderEditor();
@@ -938,12 +955,17 @@
       <div class="fld"><span>Amount each time</span>
         <div class="amt-row">${curs}<input class="inp num" id="d-amt" inputmode="decimal" value="${esc(d.amt)}" placeholder="0" style="text-align:right" aria-label="Amount"></div>
         <small id="d-conv">${esc(x.conv)}</small></div>
-      <div class="fld"><span>Repeats</span><div class="chips">${REPEATS.map(([k, l]) => `<button type="button" class="chip" data-act="rep" data-rep="${k}" aria-pressed="${d.rep === k}">${l}</button>`).join('')}</div></div>
+      <div class="fld"><span>Repeats</span><div class="chips">${REPEATS.map(([k, l]) => `<button type="button" class="chip" data-act="rep" data-rep="${k}" aria-pressed="${d.rep === k}">${l}</button>`).join('')}</div>
+        ${d.rep === 'every' ? `<label class="inline"><span>Every</span><input class="inp" id="d-every" inputmode="numeric" value="${esc(d.every)}" aria-label="Number of months"><span>months</span></label><small>From 2 to 24 months — e.g. 2 for every second month, 6 for twice a year.</small>` : ''}</div>
       <label class="fld"><span>${d.rep === 'once' ? 'Due on' : 'Next due'}</span><input class="inp" type="date" id="d-due" value="${esc(d.due)}"><small id="d-next" class="ok">${esc(x.next)}</small></label>
       ${d.rep === 'once' ? '' : `<div class="debt-box">
         <label class="chk"><input type="checkbox" id="d-debt"${debtOn ? ' checked' : ''}> Debt or loan — it ends</label>
         ${debtOn ? `<label class="inline"><span>Payments left, including the next one</span><input class="inp" id="d-left" inputmode="numeric" value="${esc(d.left)}"></label><small id="d-debt-t" class="debt-t">${esc(x.debt)}</small>` : ''}
       </div>`}
+      <div class="fld"><span>${esc(MON_LONG[vmFrom().getMonth()])}</span><div class="chips cnt">
+        <button type="button" class="chip" data-act="cnt" data-on="1" aria-pressed="${d.countNow}">Count in ${esc(MON_LONG[vmFrom().getMonth()])}</button>
+        <button type="button" class="chip" data-act="cnt" data-on="0" aria-pressed="${!d.countNow}">Leave out in ${esc(MON_LONG[vmFrom().getMonth()])}</button></div></div>
+      <label class="chk chk-box"><input type="checkbox" id="d-opt"${d.optional ? ' checked' : ''}><span>Optional<small>Not counted each month until you switch it on for that month — for costs you don't pay every month.</small></span></label>
       <p class="err" id="d-err" hidden></p>
       <div class="dlg-actions">
         ${d.id ? '<button type="button" class="btn-danger" data-act="remove">Remove</button>' : ''}
@@ -967,6 +989,15 @@
       paid: d.paid || [],
       created: d.created || ymd(new Date(Math.min(today(), parse(d.due))))
     };
+    if (d.rep === 'every') {
+      const ev = Math.floor(num(d.every));
+      if (!(ev >= 2 && ev <= 24)) return fail('Please enter every 2 to 24 months.');
+      item.every = ev;
+    }
+    if (d.optional) item.optional = true;
+    const cnt = Object.assign({}, d.count), mk = vm();
+    if (d.countNow === !d.optional) delete cnt[mk]; else cnt[mk] = d.countNow;
+    if (Object.keys(cnt).length) item.count = cnt;
     const i = S.items.findIndex(x => x.id === item.id);
     if (i >= 0) S.items[i] = item; else S.items.push(item);
     save();
@@ -991,7 +1022,7 @@
     const it = S.items.find(x => x.id === id);
     if (!it) return;
     const t = today(), occ = occurrences(it, vmFrom(), vmTo()).map(ymd);
-    if (!occ.length) return;
+    if (!occ.length || !counted(it, vm())) return;
     const paid = (it.paid || []).filter(k => k >= ymd(new Date(t.getFullYear() - 1, t.getMonth(), 1))); // keep a year
     const open = occ.filter(k => !paid.includes(k));
     it.paid = open.length ? paid.concat(open[0]) : paid.filter(k => !occ.includes(k));
@@ -1091,8 +1122,11 @@
       const cur = x.cur === 'home' || x.cur === p.home ? p.home : x.cur === 'other' || x.cur === p.other ? p.other : lst === 'home' ? p.home : p.other;
       const rep = REPS.includes(x.rep) ? x.rep : 'month';
       const due = /^\d{4}-\d{2}-\d{2}$/.test(x.due || '') ? x.due : t;
-      S.items.push({ id: S.nextId++, list: lst, name: String(x.name).slice(0, 60), amt, cur, rep, due,
-        left: rep !== 'once' && x.left > 0 ? Math.floor(x.left) : 0, paid: [], created: due < t ? due : t });
+      const it = { id: S.nextId++, list: lst, name: String(x.name).slice(0, 60), amt, cur, rep, due,
+        left: rep !== 'once' && x.left > 0 ? Math.floor(x.left) : 0, paid: [], created: due < t ? due : t };
+      if (rep === 'every') it.every = Math.min(24, Math.max(2, Math.floor(num(x.every)) || 2));
+      if (x.optional) it.optional = true;
+      S.items.push(it);
       added++;
     }
     if (!added) return toast('No costs found in that file');
@@ -1131,6 +1165,16 @@
     else if (act === 'paid') togglePaid(+b.dataset.id);
     else if (act === 'pay') openPay();
     else if (act === 'sent') openSent();
+    else if (act === 'count') {
+      const it = S.items.find(x => x.id === +b.dataset.id), mk = vm();
+      if (!it) return;
+      const before = it.count ? Object.assign({}, it.count) : null, on = !counted(it, mk);
+      it.count = Object.assign({}, it.count);
+      if (on === !it.optional) delete it.count[mk]; else it.count[mk] = on;
+      if (!Object.keys(it.count).length) delete it.count;
+      save(); render();
+      toast(`${it.name}: ${on ? 'counted' : 'not counted'} in ${MON_LONG[keyToDate(mk).getMonth()]}`, { label: 'Undo', run: () => { if (before) it.count = before; else delete it.count; save(); render(); } });
+    }
     else if (act === 'mon') { const d = keyToDate(vm()), k = monthKey(new Date(d.getFullYear(), d.getMonth() + +b.dataset.d, 1)); viewMonth = k === monthKey(today()) ? null : k; saveDraft = null; render(); }
     else if (act === 'mon-now') { viewMonth = null; saveDraft = null; render(); }
     else if (act === 'saveq') saveQuick(+b.dataset.q);
@@ -1212,6 +1256,7 @@
     else if (act === 'remove') removeItem();
     else if (act === 'cur') { draft.cur = b.dataset.cur; renderEditor(); }
     else if (act === 'rep') { draft.rep = b.dataset.rep; renderEditor(); }
+    else if (act === 'cnt') { draft.countNow = b.dataset.on === '1'; renderEditor(); }
   });
   $modal.addEventListener('input', e => {
     if (dlg) {
@@ -1233,6 +1278,7 @@
     else if (id === 'd-amt') draft.amt = e.target.value;
     else if (id === 'd-due') draft.due = e.target.value;
     else if (id === 'd-left') draft.left = e.target.value.replace(/[^0-9]/g, '');
+    else if (id === 'd-every') draft.every = e.target.value.replace(/[^0-9]/g, '');
     updateEditorTexts();
   });
   $modal.addEventListener('change', e => {
@@ -1243,6 +1289,7 @@
     }
     if (!draft) return;
     if (e.target.id === 'd-due') { draft.due = e.target.value; updateEditorTexts(); }
+    if (e.target.id === 'd-opt') { const was = draft.optional; draft.optional = e.target.checked; if (draft.countNow === !was) draft.countNow = !draft.optional; renderEditor(); }
     if (e.target.id === 'd-debt') {
       draft.left = e.target.checked ? '12' : '';
       renderEditor();
