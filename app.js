@@ -178,6 +178,7 @@
   const ord = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
   const shortDate = d => `${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`;
   const inDays = n => n === 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`;
+  const hasNum = v => /\d/.test(String(v == null ? '' : v)); // something typed — 0 counts
   const num = v => { const n = parseFloat(String(v).replace(/[^0-9.]/g, '')); return isFinite(n) ? n : 0; };
   const sym = code => (CUR[code] || { sym: code + ' ' }).sym;
   function money(n, code) {
@@ -582,7 +583,7 @@
   function closeDlg() { dlg = null; $modal.innerHTML = ''; }
   function saveSent() {
     const amt = Math.round(num(dlg.amt) * 100) / 100, err = document.getElementById('dlg-err');
-    if (!(amt > 0)) { err.textContent = 'Please enter the amount you sent.'; err.hidden = false; return; }
+    if (!hasNum(dlg.amt)) { err.textContent = 'Please enter the amount you sent (0 is fine).'; err.hidden = false; return; }
     const t = today(), mk = vm(), prevSent = (S.sent || {})[mk];
     const ticked = dlg.tick ? otherOpen(mk) : [];
     if (!S.sent) S.sent = {};
@@ -980,7 +981,7 @@
     const fail = m => { err.textContent = m; err.hidden = false; };
     const amt = num(d.amt), left = Math.floor(num(d.left));
     if (!d.name.trim()) return fail('Please give this cost a name.');
-    if (!(amt > 0)) return fail('Please enter an amount.');
+    if (!hasNum(d.amt)) return fail('Please enter an amount (0 is fine).');
     if (!d.due) return fail('Please pick a due date.');
     if (d.left !== '' && d.rep !== 'once' && !(left > 0)) return fail('Please enter how many payments are left.');
     const item = {
@@ -1089,7 +1090,7 @@
     for (const x of d.pays) if (x.amt.trim() !== '') pays[x.date] = Math.round(num(x.amt) * 100) / 100;
     for (const x of d.extras) {
       if (!x.name.trim() && !x.amt.trim()) continue;
-      if (!(num(x.amt) > 0)) return fail('Please enter an amount for each extra income, or remove it.');
+      if (!hasNum(x.amt)) return fail('Please enter an amount for each extra income (0 is fine), or remove it.');
       extras.push({ name: x.name.trim() || 'Extra income', amt: Math.round(num(x.amt) * 100) / 100 });
     }
     if (!S.pay) S.pay = {};
@@ -1118,7 +1119,7 @@
     let added = 0;
     for (const x of list) {
       const amt = num(x.amt), lst = x.list === 'home' ? 'home' : 'other';
-      if (!x.name || !(amt > 0)) continue;
+      if (!x.name || !hasNum(x.amt)) continue;
       const cur = x.cur === 'home' || x.cur === p.home ? p.home : x.cur === 'other' || x.cur === p.other ? p.other : lst === 'home' ? p.home : p.other;
       const rep = REPS.includes(x.rep) ? x.rep : 'month';
       const due = /^\d{4}-\d{2}-\d{2}$/.test(x.due || '') ? x.due : t;
