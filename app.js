@@ -238,7 +238,8 @@
     if (!isDebt(it)) return null;
     const a = parse(it.due), t = today();
     let remaining = 0;
-    for (let k = 0; k < it.left; k++) if (step(a, it.rep, k, everyN(it)) >= t) remaining++;
+    // A payment is still to go if its date hasn't passed and it isn't ticked paid (paying early counts it down).
+    for (let k = 0; k < it.left; k++) { const d = step(a, it.rep, k, everyN(it)); if (d >= t && !isPaid(it, d)) remaining++; }
     return { remaining, end: step(a, it.rep, it.left - 1, everyN(it)), toGo: remaining * it.amt };
   }
   function nthWeekday(y, m, nth, wd) {
