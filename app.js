@@ -274,9 +274,11 @@
 
   // ---------- money maths ----------
   const pairKey = () => `${S.profile.home}-${S.profile.other}`;
+  // Single Entry: one country, one list. The other country's costs stay saved but hidden.
+  const single = () => !!(S.profile && S.profile.mode === 'single');
   function rateValue() {
     const p = S.profile;
-    if (p.home === p.other) return 1;
+    if (p.home === p.other || single()) return 1;
     if (!S.rate || S.rate.pair !== pairKey()) return null;
     if (S.rate.manual) return S.rate.value;
     const v = S.rate.value - (p.margin || 0); // e.g. a remittance service's rate: market minus their margin
@@ -308,7 +310,9 @@
     const inc = income(from, to), pays = inc.pays, income_ = inc.total;
     const t = { other: 0, home: 0 }, due = { other: 0, home: 0 }, lines = [];
     let missing = false;
+    const one = single();
     for (const it of S.items) {
+      if (one && it.list === 'other') continue;
       const occ = occurrences(it, from, to).filter(d => counted(it, monthKey(d))), n = occ.length;
       if (!n) continue;
       const v = toHome(it.amt, it.cur, rate);
@@ -331,7 +335,7 @@
       const f = keyToDate(k), s = summary(f, monthEnd(f));
       S.history[k] = {
         pays: s.pays, income: s.income, salary: S.profile.salary, payLines: s.payLines, other: s.other, home: s.home, saved: s.saved,
-        rate: rateValue(), homeCur: S.profile.home, otherCur: S.profile.other, lines: s.lines,
+        rate: rateValue(), homeCur: S.profile.home, otherCur: single() ? S.profile.home : S.profile.other, single: single() || undefined, lines: s.lines,
         sent: ((S.sent || {})[k] || {}).amt || 0, moved: ((S.savings || {})[k] || {}).amt || 0
       };
       changed = true;
@@ -343,7 +347,7 @@
   // ---------- exchange rate ----------
   async function refreshRate(force) {
     const p = S.profile;
-    if (!p || p.home === p.other || rateBusy) return;
+    if (!p || p.home === p.other || single() || rateBusy) return;
     const fresh = S.rate && S.rate.pair === pairKey() && Date.now() - S.rate.at < RATE_MAX_AGE;
     if (!force && (fresh || (S.rate && S.rate.manual && S.rate.pair === pairKey()))) return;
     rateBusy = true;
@@ -387,7 +391,7 @@
 
   function rateBtnHtml() {
     const p = S.profile;
-    if (p.home === p.other) return '';
+    if (p.home === p.other || single()) return '';
     const v = rateValue();
     const main = v ? `${sym(p.home)}1 = ${sym(p.other)}${v.toFixed(2)}` : 'No rate yet';
     const sub = rateBusy ? 'checking…' : !v ? 'tap to get it' : S.rate.manual ? 'your own rate' : (p.margin ? `market −${p.margin} · ` : '') + since(S.rate.at);
@@ -408,8 +412,11 @@
     const rate = vmRate(), s = summary(from, to, rate);
     const np = paydays(addDays(t, 1), addDays(t, 400))[0];
     const otherName = CUR[p.other].country;
-    const twoCur = p.home !== p.other;
-    const sent = (S.sent || {})[mk], moved = (S.savings || {})[mk];
+    const one = single();
+    const twoCur = p.home !== p.other && !one;
+    if (one && tab === 'other') tab = 'home';
+    const homeName = one ? 'Costs' : 'Local';
+    const sent = one ? null : (S.sent || {})[mk], moved = (S.savings || {})[mk];
     const pct = n => s.income > 0 ? Math.max(0, Math.min(100, n / s.income * 100)).toFixed(1) + '%' : '0%';
     const left = s.saved;
     const count = key => s.lines.filter(l => l.list === key).length;
@@ -418,9 +425,9 @@
 
     const tabs = [
       ['other', otherName, otherBig(s.other), 'dot-other'],
-      ['home', 'Local', money(s.home, p.home), 'dot-home'],
+      ['home', homeName, money(s.home, p.home), 'dot-home'],
       ['over', 'Overview', money(left, p.home), 'dot-over']
-    ].map(([k, label, sub, dot]) => `<button type="button" role="tab" class="tab" id="tab-${k}" aria-controls="panel" aria-selected="${tab === k}" data-act="tab" data-tab="${k}"><span class="tab-l"><span class="dot ${dot}"></span><span>${esc(label)}</span></span><small>${esc(sub)}</small></button>`).join('');
+    ].filter(x => !one || x[0] !== 'other').map(([k, label, sub, dot]) => `<button type="button" role="tab" class="tab" id="tab-${k}" aria-controls="panel" aria-selected="${tab === k}" data-act="tab" data-tab="${k}"><span class="tab-l"><span class="dot ${dot}"></span><span>${esc(label)}</span></span><small>${esc(sub)}</small></button>`).join('');
 
     // Total at the top of a list. The overseas list shows its own currency first, home currency under it.
     const listHead = key => {
@@ -429,7 +436,9 @@
       const nOff = S.items.filter(it => it.list === key && !counted(it, mk) && occurrences(it, from, to).length).length;
       const sub = (key === 'other' && twoCur && rate ? money(tot, p.home) + ' · ' : '') + `${n} cost${n === 1 ? '' : 's'} · ${toPayText(tot, due)}${nOff ? ` · ${nOff} not counted` : ''}`;
       const sentNote = key === 'other' && sent ? `<div class="sent-note"><span>Sent <b>${money(sent.amt, p.home)}</b>${twoCur && sent.rate ? ` (≈ ${money(sent.amt * sent.rate, p.other)})` : ''} on ${esc(shortDate(parse(sent.date)))}</span><button type="button" class="link" data-act="sent">Change</button></div>` : '';
-      return `<div class="sum"><div class="sum-t"><b class="sum-big">${big}</b><small>${esc(sub)}</small></div>${key === 'other' ? `<button type="button" class="btn sum-btn" data-act="sent">Money sent</button>` : ''}</div>${sentNote}`;
+      const nHidden = one && key === 'home' ? S.items.filter(it => it.list === 'other').length : 0;
+      const hiddenNote = nHidden ? `<div class="sent-note"><span>${nHidden} ${esc(otherName)} cost${nHidden === 1 ? ' is' : 's are'} saved but hidden — Single Entry.</span><button type="button" class="link" data-act="nav" data-view="setup">Setup</button></div>` : '';
+      return `<div class="sum"><div class="sum-t"><b class="sum-big">${big}</b><small>${esc(sub)}</small></div>${key === 'other' ? `<button type="button" class="btn sum-btn" data-act="sent">Money sent</button>` : ''}</div>${sentNote}${hiddenNote}`;
     };
 
     const overview = () => {
@@ -439,13 +448,14 @@
       const inOther = v => twoCur && rate ? '≈ ' + money(v * rate, p.other) : ''; // spare in pesos
       if (base <= 0) return `<div class="empty"><b>Nothing to show yet</b><span>Add your pay and costs to see where your money goes.</span></div>`;
       const segs = [
-        { n: otherName, v: s.other, c: 'var(--other)', sub: (twoCur && rate ? money(s.other * rate, p.other) + ' · ' : '') + `${count('other')} costs` },
-        { n: 'Local', v: s.home, c: 'var(--home-bar)', sub: `${count('home')} costs` },
+        one ? null : { n: otherName, v: s.other, c: 'var(--other)', sub: (twoCur && rate ? money(s.other * rate, p.other) + ' · ' : '') + `${count('other')} costs` },
+        { n: homeName, v: s.home, c: 'var(--home-bar)', sub: `${count('home')} costs` },
         { n: 'Savings', v: sv, c: 'var(--save)', sub: moved ? `moved ${shortDate(parse(moved.date))} ✓` : sv > 0 ? 'planned' : 'nothing yet' },
         { n: 'Spare', v: lo - sv, c: 'var(--spare)', sub: (inOther(lo - sv) ? inOther(lo - sv) + ' · ' : '') + 'for anything else this month' }
-      ];
+      ].filter(Boolean);
       const pd = segs.map(x => `<div class="pd"><i style="background:${x.c}"></i><span class="pd-n">${esc(x.n)}<small>${esc(x.sub)}</small></span><span class="pd-a">${money(x.v, p.home)}<small>${Math.round(x.v / base * 100)}%</small></span></div>`).join('');
-      const formula = `<p class="lo-f">Pay ${money(s.income, p.home)} − Local ${money(s.home, p.home)} − ${esc(otherName)} ${money(s.other, p.home)} = <b>${money(left, p.home)}</b></p>`;
+      const formula = one ? `<p class="lo-f">Pay ${money(s.income, p.home)} − Costs ${money(s.home, p.home)} = <b>${money(left, p.home)}</b></p>`
+        : `<p class="lo-f">Pay ${money(s.income, p.home)} − Local ${money(s.home, p.home)} − ${esc(otherName)} ${money(s.other, p.home)} = <b>${money(left, p.home)}</b></p>`;
       let plan;
       if (left <= 0) plan = `<div><h3>Over budget</h3>${formula}<p class="sub">Your costs this month are ${money(-left, p.home)} more than your pay.</p></div>`;
       else if (moved) plan = `<div><h3>Leftover this month</h3>${formula}</div>
@@ -495,14 +505,14 @@
       const offTotal = offList.reduce((a, { it }) => a + (toHome(it.amt, it.cur, rate) || 0) * occurrences(it, from, to).length, 0);
       const rows = list.filter(x => !x.off).map(rowHtml).join('')
         + (offList.length ? `<div class="grp-off">Not counted in ${esc(MON_LONG[mon])} · ${money(offTotal, p.home)}</div>` + offList.map(rowHtml).join('') : '');
-      const empty = `<div class="empty"><b>No ${key === 'other' ? esc(otherName) : 'local'} costs yet</b><span>${key === 'other' ? 'Money you send or pay in ' + esc(otherName) + ' — family allowance, loans, bills.' : 'Rent, groceries, phone, transport, bills.'}</span></div>`;
+      const empty = `<div class="empty"><b>No ${key === 'other' ? esc(otherName) + ' ' : one ? '' : 'local '}costs yet</b><span>${key === 'other' ? 'Money you send or pay in ' + esc(otherName) + ' — family allowance, loans, bills.' : 'Rent, groceries, phone, transport, bills.'}</span></div>`;
       return listHead(key) + (rows || empty) + `<button type="button" class="add-btn" data-act="add" data-list="${key}">${ICON.plus}Add a cost</button>`;
     };
-    const cols = [['other', otherName, 'dot-other'], ['home', 'Local', 'dot-home'], ['over', 'Overview', 'dot-over']]
-      .map(([k, label, dot]) => `<section class="col col-${k}" aria-label="${esc(label)}"><header class="col-h"><span class="dot ${dot}"></span><h2>${esc(label)}</h2></header><div class="col-b">${body(k)}</div></section>`).join('');
+    const cols = [['other', otherName, 'dot-other'], ['home', homeName, 'dot-home'], ['over', 'Overview', 'dot-over']]
+      .filter(x => !one || x[0] !== 'other').map(([k, label, dot]) => `<section class="col col-${k}" aria-label="${esc(label)}"><header class="col-h"><span class="dot ${dot}"></span><h2>${esc(label)}</h2></header><div class="col-b">${body(k)}</div></section>`).join('');
 
     const tileSub = (tot, due, extra) => extra || toPayText(tot, due);
-    return `<div class="wrap">
+    return `<div class="wrap${one ? ' one' : ''}">
       <header class="top">
         <div class="logo" aria-hidden="true">${ICON.logo}</div>
         <div class="top-name"><span class="eyebrow">PisoWise</span><span class="hello">Hi, ${esc(p.name)}</span></div>
@@ -521,8 +531,8 @@
         <div class="bar" aria-hidden="true"><span style="width:${pct(s.other)};background:var(--other-bar)"></span><span style="width:${pct(s.home)};background:var(--home-bar)"></span>${moved ? `<span style="width:${pct(moved.amt)};background:var(--save-bar)"></span>` : ''}</div>
         <div class="hero-grid">
           <button type="button" class="pay-btn" data-act="pay" aria-label="Income ${esc(money(s.income, p.home))}. Change this month's pay."><small>Income ${ICON.pen}</small><b>${money(s.income, p.home)}</b><small class="${s.extra || s.payChanged ? 'accent' : ''}">${s.extra ? '+' + money(s.extra, p.home) + ' extra' : s.payChanged ? 'pay changed' : `${s.pays} payday${s.pays === 1 ? '' : 's'}`}</small></button>
-          <div><small>Local</small><b>${money(s.home, p.home)}</b><small${s.home > 0 && s.leftHome < 0.005 ? ' class="accent"' : ''}>${tileSub(s.home, s.leftHome)}</small></div>
-          <div><small>${esc(otherName)}</small><b>${money(s.other, p.home)}</b><small${sent || (s.other > 0 && s.leftOther < 0.005) ? ' class="accent"' : ''}>${tileSub(s.other, s.leftOther, sent ? 'sent ✓' : '')}</small></div>
+          <div><small>${homeName}</small><b>${money(s.home, p.home)}</b><small${s.home > 0 && s.leftHome < 0.005 ? ' class="accent"' : ''}>${tileSub(s.home, s.leftHome)}</small></div>
+          ${one ? '' : `<div><small>${esc(otherName)}</small><b>${money(s.other, p.home)}</b><small${sent || (s.other > 0 && s.leftOther < 0.005) ? ' class="accent"' : ''}>${tileSub(s.other, s.leftOther, sent ? 'sent ✓' : '')}</small></div>`}
         </div>
         ${s.missing ? `<div class="hero-note">Some ${esc(otherName)} costs aren't counted yet — no exchange rate. Tap the rate button or set one in Setup.</div>` : ''}
       </section>
@@ -618,7 +628,7 @@
   function historyHtml() {
     const p = S.profile, t = today(), cur = monthKey(t);
     const live = summary(new Date(t.getFullYear(), t.getMonth(), 1), monthEnd(t));
-    const months = [{ key: cur, live: true, pays: live.pays, income: live.income, salary: p.salary, payLines: live.payLines, other: live.other, home: live.home, saved: live.saved, rate: rateValue(), homeCur: p.home, otherCur: p.other, lines: live.lines, sent: ((S.sent || {})[cur] || {}).amt || 0, moved: ((S.savings || {})[cur] || {}).amt || 0 }]
+    const months = [{ key: cur, live: true, pays: live.pays, income: live.income, salary: p.salary, payLines: live.payLines, other: live.other, home: live.home, saved: live.saved, rate: rateValue(), homeCur: p.home, otherCur: single() ? p.home : p.other, single: single(), lines: live.lines, sent: ((S.sent || {})[cur] || {}).amt || 0, moved: ((S.savings || {})[cur] || {}).amt || 0 }]
       .concat(Object.keys(S.history).filter(k => k < cur).sort().reverse().map(k => Object.assign({ key: k }, S.history[k])));
     const first = months[months.length - 1].key;
     const total = months.reduce((a, m) => a + m.saved, 0);
@@ -645,8 +655,8 @@
         </button>
         ${open ? `<div class="detail">
           ${payDetail(m)}
-          <div><span class="lst"><span class="dot dot-other"></span>${esc(otherLabel)}</span><span>${money(m.other, m.homeCur)}</span></div>${lines('other')}
-          <div><span class="lst"><span class="dot dot-home"></span>Local</span><span>${money(m.home, m.homeCur)}</span></div>${lines('home')}
+          ${m.single ? '' : `<div><span class="lst"><span class="dot dot-other"></span>${esc(otherLabel)}</span><span>${money(m.other, m.homeCur)}</span></div>${lines('other')}`}
+          <div><span class="lst"><span class="dot dot-home"></span>${m.single ? 'Costs' : 'Local'}</span><span>${money(m.home, m.homeCur)}</span></div>${lines('home')}
           ${m.otherCur !== m.homeCur ? `<div><span class="k">Rate used</span><span>${m.rate ? `${sym(m.homeCur)}1 = ${sym(m.otherCur)}${m.rate.toFixed(2)}` : 'none'}</span></div>` : ''}
           ${(m.sent = ((S.sent || {})[m.key] || {}).amt || 0) ? `<div><span class="k">Sent to ${esc(otherLabel)}</span><span>${money(m.sent, m.homeCur)}</span></div>` : ''}
           ${(m.moved = ((S.savings || {})[m.key] || {}).amt || 0) ? `<div><span class="k">Moved to savings</span><span>${money(m.moved, m.homeCur)}</span></div>` : ''}
@@ -701,12 +711,18 @@
       ${head}
       <form class="setup" id="setup" novalidate>
         <label class="fld"><span>Your name</span><input class="inp" name="name" value="${esc(p.name)}" autocomplete="given-name" maxlength="40" required></label>
+        <fieldset class="fld" style="border:0;margin:0;padding:0">
+          <legend class="lbl" style="padding:0;margin-bottom:6px">Where do your costs go?</legend>
+          <input type="hidden" name="mode" value="${p.mode === 'single' ? 'single' : 'two'}">
+          <div class="grid2">${[['single', 'Single Entry', 'All my costs are in the country I live in'], ['two', 'Two Way Entry', 'I also pay costs in another country, e.g. sending money home']]
+            .map(([k, l, h]) => `<button type="button" class="opt" data-act="mode" data-mode="${k}" aria-pressed="${(p.mode === 'single' ? 'single' : 'two') === k}"><span class="radio"></span><span><b>${l}</b><small>${h}</small></span></button>`).join('')}</div>
+        </fieldset>
         <div class="fld">
-          <div class="grid2">
+          <div class="grid2" id="cty-grid">
             <label class="fld"><span>I live in</span><select class="inp" name="home">${currencyOptions(p.home)}</select></label>
-            <label class="fld"><span>I also pay for</span><select class="inp" name="other">${currencyOptions(p.other)}</select></label>
+            <label class="fld" id="other-f"><span>I also pay for</span><select class="inp" name="other">${currencyOptions(p.other)}</select></label>
           </div>
-          <small>Your two lists and the exchange rate follow these.</small>
+          <small id="cty-note">Your two lists and the exchange rate follow these.</small>
         </div>
         <label class="fld"><span>Usual salary each payday (after tax)</span>
           <span class="prefix"><span id="sal-sym">${esc(sym(p.home).trim())}</span><input name="salary" inputmode="decimal" value="${p.salary !== '' && p.salary != null ? esc(Number(p.salary).toFixed(2)) : ''}" placeholder="0.00" autocomplete="off"></span>
@@ -851,7 +867,7 @@
     if (!f) return null;
     const v = n => f.elements[n] ? f.elements[n].value : '';
     return {
-      name: v('name').trim(), home: v('home'), other: v('other'), salary: num(v('salary')), salaryTyped: hasNum(v('salary')),
+      name: v('name').trim(), mode: v('mode') === 'single' ? 'single' : 'two', home: v('home'), other: v('other'), salary: num(v('salary')), salaryTyped: hasNum(v('salary')),
       freq: v('freq'), last: v('last'), nth: +v('nth'), wd: +v('wd'),
       ratemode: v('ratemode') || 'market', manual: v('ratemode') === 'own', margin: num(v('margin')), rate: num(v('rate'))
     };
@@ -876,8 +892,12 @@
       const mt = document.getElementById('margin-t'), mk = +mt.dataset.market;
       mt.textContent = mk && p.margin > 0 && p.margin < mk ? `Today: ${sym(p.home)}1 = ${sym(p.other)}${(mk - p.margin).toFixed(2)} (market ${mk.toFixed(2)})` : '';
     }
+    document.querySelectorAll('[data-act="mode"]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === p.mode));
+    document.getElementById('other-f').hidden = p.mode === 'single';
+    document.getElementById('cty-grid').classList.toggle('one-col', p.mode === 'single');
+    document.getElementById('cty-note').textContent = p.mode === 'single' ? 'One list in one currency — no exchange rate.' : 'Your two lists and the exchange rate follow these.';
     const rb = document.getElementById('rate-box');
-    if (rb) rb.hidden = p.home === p.other;
+    if (rb) rb.hidden = p.home === p.other || p.mode === 'single';
     const tiles = document.getElementById('pay-tiles');
     if (p.freq !== 'custom' && !p.last) { tiles.innerHTML = '<span class="sub">Pick your last payday</span>'; return; }
     const t = today(), ds = paydays(addDays(t, 1), addDays(t, 400), p).slice(0, 3);
@@ -890,10 +910,11 @@
     if (!p.name) return fail('Please enter your name.');
     if (!p.salaryTyped) return fail('Please enter your salary for each payday (0 is fine if it changes every month).');
     if (p.freq !== 'custom' && !p.last) return fail('Please pick your last payday.');
-    if (p.manual && !(p.rate > 0)) return fail('Please enter your exchange rate, or pick Market rate.');
-    if (p.ratemode === 'margin' && !(p.margin >= 0)) return fail('Please enter the margin, or pick Market rate.');
+    const two = p.mode !== 'single';
+    if (two && p.manual && !(p.rate > 0)) return fail('Please enter your exchange rate, or pick Market rate.');
+    if (two && p.ratemode === 'margin' && !(p.margin >= 0)) return fail('Please enter the margin, or pick Market rate.');
     const first = !S.profile, old = S.profile;
-    S.profile = { name: p.name, home: p.home, other: p.other, salary: p.salary, freq: p.freq, last: p.last || ymd(today()), nth: p.nth, wd: p.wd, margin: p.ratemode === 'margin' ? p.margin : 0 };
+    S.profile = { name: p.name, mode: p.mode, home: p.home, other: p.other, salary: p.salary, freq: p.freq, last: p.last || ymd(today()), nth: p.nth, wd: p.wd, margin: p.ratemode === 'margin' ? p.margin : 0 };
     if (old) {
       for (const it of S.items) {
         if (it.cur === old.home) it.cur = p.home;
@@ -901,7 +922,8 @@
         if (it.cur !== p.home && it.cur !== p.other) it.cur = it.list === 'home' ? p.home : p.other;
       }
     }
-    if (p.manual) S.rate = { pair: pairKey(), value: p.rate, at: Date.now(), manual: true };
+    if (!two) { /* keep the saved rate for when Two Way Entry comes back */ }
+    else if (p.manual) S.rate = { pair: pairKey(), value: p.rate, at: Date.now(), manual: true };
     else if (S.rate && (S.rate.manual || S.rate.pair !== pairKey())) S.rate = null;
     if (first) S.seen = monthKey(today());
     save();
@@ -930,7 +952,7 @@
   function editorTexts() {
     const p = S.profile, d = draft, amt = d.subs ? subsTotal() : num(d.amt), rate = rateValue();
     let conv = '';
-    if (p.home !== p.other && amt > 0) {
+    if (p.home !== p.other && !single() && amt > 0) {
       if (d.cur === p.home) conv = rate ? `≈ ${money(amt * rate, p.other)} in ${CUR[p.other].country}` : '';
       else conv = rate ? `≈ ${money(amt / rate, p.home)} at ${rate.toFixed(2)}` : 'No exchange rate yet';
     }
@@ -953,9 +975,9 @@
 
   function renderEditor() {
     const p = S.profile, d = draft, x = editorTexts();
-    const listName = d.list === 'home' ? 'Local' : CUR[p.other].country;
+    const listName = d.list === 'home' ? (single() ? 'Costs' : 'Local') : CUR[p.other].country;
     const debtOn = d.left !== '';
-    const curs = p.home === p.other ? '' : `<div class="seg" role="group" aria-label="Currency">${[p.other, p.home].map(c => `<button type="button" data-act="cur" data-cur="${c}" aria-pressed="${d.cur === c}" aria-label="${esc(CUR[c].country)} currency">${esc(sym(c).trim())}</button>`).join('')}</div>`;
+    const curs = p.home === p.other || single() ? '' : `<div class="seg" role="group" aria-label="Currency">${[p.other, p.home].map(c => `<button type="button" data-act="cur" data-cur="${c}" aria-pressed="${d.cur === c}" aria-label="${esc(CUR[c].country)} currency">${esc(sym(c).trim())}</button>`).join('')}</div>`;
     $modal.innerHTML = `<div class="overlay" data-act="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
       <div class="dlg-head"><h2 id="dlg-t">${d.id ? 'Edit cost' : 'New cost'}</h2><span class="pill pill-${d.list}">${esc(listName)}</span></div>
       <label class="fld"><span>Name</span><input class="inp" id="d-name" value="${esc(d.name)}" placeholder="${d.list === 'home' ? 'e.g. Rent' : 'e.g. Family allowance'}" maxlength="60"></label>
@@ -1214,6 +1236,7 @@
     else if (act === 'edit') { const it = S.items.find(x => x.id === +b.dataset.id); if (it) openEditor(it); }
     else if (act === 'month') { openMonth = openMonth === b.dataset.key && b.classList.contains('month-btn') ? '-' : b.dataset.key; render(); }
     else if (act === 'ratemode') { document.querySelector('#setup [name="ratemode"]').value = b.dataset.mode; syncSetup(); }
+    else if (act === 'mode') { document.querySelector('#setup [name="mode"]').value = b.dataset.mode; syncSetup(); }
     else if (act === 'freq') { document.querySelector('#setup [name="freq"]').value = b.dataset.freq; syncSetup(); }
     else if (act === 'backup') backup();
     else if (act === 'signout') signOut();
