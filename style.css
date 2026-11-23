@@ -386,7 +386,7 @@ select.inp { appearance: none; -webkit-appearance: none; padding-right: 32px; ba
 .row-w { display: flex; align-items: center; gap: 0; border-bottom: 1px solid var(--line2); }
 .row-w .row { border-bottom: 0; }
 .row-w .row.has-tick { padding-left: 10px; }
-.tick { width: 36px; height: 36px; flex: none; margin-left: 4px; border-radius: 50%; border: 2px solid var(--field-line); background: var(--surface); color: transparent; display: flex; align-items: center; justify-content: center; padding: 0; }
+.tick { width: 36px; height: 36px; flex: none; margin: 0 4px 0 6px; border-radius: 50%; border: 2px solid var(--field-line); background: var(--surface); color: transparent; display: flex; align-items: center; justify-content: center; padding: 0; }
 .tick:hover { border-color: var(--home); color: var(--home); }
 .tick.on { background: var(--home); border-color: var(--home); color: var(--surface); }
 .tick.part { border-color: var(--home); color: var(--home); }
@@ -447,7 +447,7 @@ select.inp { appearance: none; -webkit-appearance: none; padding-right: 32px; ba
 .msw-m .link { font-size: 12px; padding: 0; }
 
 /* Counted this month / optional */
-.sw { width: 40px; height: 24px; flex: none; margin: 0 2px 0 6px; border-radius: 99px; border: 0; background: var(--field-line); position: relative; padding: 0; }
+.sw { width: 40px; height: 24px; flex: none; margin: 0 0 0 8px; border-radius: 99px; border: 0; background: var(--field-line); position: relative; padding: 0; }
 .sw i { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #FFFFFF; transition: left .15s; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
 .sw.on { background: var(--btn); }
 .sw.on i { left: 19px; }

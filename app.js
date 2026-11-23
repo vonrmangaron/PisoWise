@@ -486,9 +486,9 @@
         const subsBtn = subsN ? `<button type="button" class="exp${subsOpen ? ' on' : ''}" data-act="subs" data-id="${it.id}" aria-expanded="${!!subsOpen}" aria-label="${subsOpen ? 'Hide' : 'Show'} what's in ${esc(it.name)}">${ICON.chev}</button>` : '';
         const subsList = subsOpen ? `<div class="subs">${it.subs.map(x => `<div class="subl"><span>${esc(x.name)}</span><span>${money(x.amt, it.cur)}</span></div>`).join('')}<div class="subl t"><span>Total</span><span>${money(it.amt, it.cur)}</span></div></div>` : '';
         const sw = n ? `<button type="button" class="sw${off ? '' : ' on'}" data-act="count" data-id="${it.id}" role="switch" aria-checked="${!off}" aria-label="Count ${esc(it.name)} in ${esc(MON_LONG[mon])}" title="${off ? 'Not counted in ' : 'Counted in '}${esc(MON_LONG[mon])}"><i></i></button>` : '';
-        if (off) return `<div class="row-w is-off"><span class="tick none" aria-hidden="true"></span><button type="button" class="row has-tick" data-act="edit" data-id="${it.id}">
+        if (off) return `<div class="row-w is-off">${sw}<button type="button" class="row has-tick" data-act="edit" data-id="${it.id}">
           <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${esc(dueDesc(it))}</span>${it.optional ? '<span class="tag-opt">Optional</span>' : ''}</span>
-          <span class="row-amt"><b>${money(it.amt * n, it.cur)}</b><small class="due">not counted</small></span></button>${subsBtn}${sw}</div>${subsList}`;
+          <span class="row-amt"><b>${money(it.amt * n, it.cur)}</b><small class="due">not counted</small></span></button>${subsBtn}<span class="tick none" aria-hidden="true"></span></div>${subsList}`;
         const np = occ.filter(d => isPaid(it, d)).length, allPaid = n > 0 && np === n;
         const ini = `<span class="ini ini-${it.list}" aria-hidden="true">${esc((it.name.trim()[0] || '?').toUpperCase())}</span>`;
         const tick = n ? `<button type="button" class="tick${allPaid ? ' on' : np ? ' part' : ''}" data-act="paid" data-id="${it.id}" aria-pressed="${allPaid}" aria-label="${esc(it.name)}: ${allPaid ? 'paid this month. Tap to undo.' : 'mark as paid'}${n > 1 ? ` (${np} of ${n} paid)` : ''}">${allPaid ? ICON.check : np ? `<small>${np}/${n}</small>` : ICON.check}</button>` : '';
@@ -497,11 +497,11 @@
           : `<small class="due${dd !== null && dd <= 3 ? ' urgent' : ''}">${nd ? 'due ' + inDays(dd) : ds ? 'paid off' : 'done'}</small>`;
         const conv = it.cur !== p.home ? (rate ? `<small>≈ ${money(it.amt / rate, p.home)}</small>` : '<small>needs a rate</small>') : '';
         const debtTag = ds ? `<span class="tag-debt">${ds.remaining ? `${ds.remaining} left · ends ${MON[ds.end.getMonth()]} ${ds.end.getFullYear()}` : 'Paid off'}</span>` : '';
-        return `<div class="row-w${allPaid ? ' is-paid' : ''}">${tick}<button type="button" class="row${nd || n ? '' : ' done'}${tick ? ' has-tick' : ''}" data-act="edit" data-id="${it.id}">
-          ${tick ? '' : ini}
+        return `<div class="row-w${allPaid ? ' is-paid' : ''}">${sw}<button type="button" class="row${nd || n ? '' : ' done'}${sw ? ' has-tick' : ''}" data-act="edit" data-id="${it.id}">
+          ${sw ? '' : ini}
           <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${esc(dueDesc(it))}${n > 1 ? ` · ${n}× this month` : ''}${subsN ? ` · ${subsN} item${subsN === 1 ? '' : 's'}` : ''}</span>${debtTag}${it.optional ? '<span class="tag-opt">Optional</span>' : ''}</span>
           <span class="row-amt"><b>${money(it.amt, it.cur)}</b>${conv}${status}</span>
-        </button>${subsBtn}${sw}</div>${subsList}`;
+        </button>${subsBtn}${tick}</div>${subsList}`;
       };
       const offTotal = offList.reduce((a, { it }) => a + (toHome(it.amt, it.cur, rate) || 0) * occurrences(it, from, to).length, 0);
       const rows = list.filter(x => !x.off).map(rowHtml).join('')
