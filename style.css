@@ -485,3 +485,19 @@ select.inp { appearance: none; -webkit-appearance: none; padding-right: 32px; ba
 .one .tabs, .one .hero-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (min-width: 1100px) { .one .cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .grid2.one-col { grid-template-columns: minmax(0, 1fr); }
+
+/* Each month keeps its own costs: list switch, "from this month on" hint, remove confirm, restore points */
+.seg-list { display: grid; grid-template-columns: 1fr 1fr; }
+.seg-list button { min-height: 42px; }
+.seg-list button.sl-other[aria-pressed="true"] { background: var(--other-tint); color: var(--other); }
+.seg-list button.sl-home[aria-pressed="true"] { background: var(--home-tint); color: var(--home); }
+.ed-hint { margin: 0; font-size: 13px; line-height: 1.45; padding: 9px 11px; border-radius: 8px; background: var(--home-tint); color: var(--home); }
+.rm-ask { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--red-line); border-radius: 10px; }
+.rm-ask p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink); }
+.rm-ask .dlg-actions > * { flex: 1; }
+.rps { display: flex; flex-direction: column; }
+.rp { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line2); }
+.rp-m { display: flex; flex-direction: column; min-width: 0; }
+.rp-m b { font-weight: 600; overflow-wrap: anywhere; }
+.rp-m small { color: var(--muted); font-size: 12px; }
+.rp .rp-btn { min-height: 40px; flex: none; }

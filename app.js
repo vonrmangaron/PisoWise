@@ -66,12 +66,13 @@
   let openSubs = new Set(); // costs whose breakdown is open in the list
   let viewMonth = null;  // month shown on the Budget screen ('YYYY-MM'); null = this month
   let confirmReset = false;
+  let confirmRp = null; // restore point waiting for a second tap
   let rateBusy = false;
   let undo = null;
   let toastTimer = 0;
 
   // ---------- storage ----------
-  function blank() { return { v: 1, profile: null, items: [], rate: null, history: {}, pay: {}, sent: {}, savings: {}, seen: null, nextId: 1 }; }
+  function blank() { return { v: 1, profile: null, items: [], rate: null, history: {}, pay: {}, sent: {}, savings: {}, seen: null, nextId: 1, points: [] }; }
   const tidy = s => s && s.v === 1 ? Object.assign(blank(), s) : null;
   // This device keeps a copy of the account's budget so it opens fast and works offline.
   function loadLocal() {
@@ -129,6 +130,7 @@
           }
         } else setSync('ok');
         settle();
+        if (sync.state === 'ok') dayPoint();
         return;
       }
       if (row.at > meta.rev && (!meta.dirty || row.at > meta.editedAt)) {
@@ -139,6 +141,7 @@
       } else if (meta.dirty) await push();
       else setSync('ok');
     } catch (e) { syncFailed(e); }
+    if (sync.state === 'ok') dayPoint();
   }
   // After the budget changed underneath: open the right page and redraw (not while a pop-up is open).
   function settle() {
@@ -209,6 +212,8 @@
   const isDebt = it => it.rep !== 'once' && it.left > 0;
   // Every due date of a cost between from and to (inclusive). Nothing before the month it was added.
   function occurrences(it, from, to) {
+    // A cost stopped from a month on ('until' = its last month) has no dates after that month.
+    if (it.until) { const e = monthEnd(keyToDate(it.until)); if (to > e) to = e; }
     const a = parse(it.due), out = [];
     const floor = it.created ? keyToDate(it.created.slice(0, 7)) : from;
     const lo = from > floor ? from : floor;
@@ -229,6 +234,12 @@
   // The month shown on the Budget screen, its first and last day, and the rate to use for it
   // (a finished month keeps the rate saved in History, so its numbers don't move).
   const vm = () => viewMonth || monthKey(today());
+  // Each month keeps its own costs: a change made while looking at a month applies to that month and later ones.
+  // A cost runs from its 'created' month to its 'until' month (no until = it carries on).
+  const startKey = it => (it.created || '0000-00').slice(0, 7);
+  const activeIn = (it, mk) => startKey(it) <= mk && (!it.until || it.until >= mk);
+  const prevKey = k => { const d = keyToDate(k); return monthKey(new Date(d.getFullYear(), d.getMonth() - 1, 1)); };
+  const monName = k => MON_LONG[keyToDate(k).getMonth()];
   const vmFrom = () => keyToDate(vm());
   const vmTo = () => monthEnd(keyToDate(vm()));
   const vmRate = () => { const h = S.history[vm()]; return vm() < monthKey(today()) && h && h.rate ? h.rate : rateValue(); };
@@ -476,7 +487,7 @@
     // One list's rows: the phone shows one at a time under the tabs, tablet and desktop show them side by side.
     const body = key => {
       if (key === 'over') return overview();
-      const list = S.items.filter(it => it.list === key && (isNow || occurrences(it, from, to).length)).map(it => ({ it, nd: isNow ? nextDue(it) : occurrences(it, from, to).find(d => !isPaid(it, d)) || null }))
+      const list = S.items.filter(it => it.list === key && (isNow ? activeIn(it, mk) : occurrences(it, from, to).length)).map(it => ({ it, nd: isNow ? nextDue(it) : occurrences(it, from, to).find(d => !isPaid(it, d)) || null }))
         .map(x => Object.assign(x, { off: !counted(x.it, mk) && occurrences(x.it, from, to).length > 0 }))
         .sort((a, b) => (a.off - b.off) || ((a.nd ? a.nd.getTime() : 9e15) - (b.nd ? b.nd.getTime() : 9e15)));
       const offList = list.filter(x => x.off);
@@ -765,6 +776,11 @@
         <span class="sub">Sign in with this email on any phone, tablet or computer to see the same budget.</span>
         <div class="btn-row"><button type="button" class="btn-ghost" data-act="signout">${confirmOut ? 'Not saved yet — tap again to sign out' : 'Sign out'}</button></div>
       </div>
+      <h2 class="section-t">Restore points</h2>
+      <div class="box">
+        <span class="sub">Saved in your account: one a day, plus one just before anything is removed. Kept for ${POINT_DAYS} days. Restoring saves your budget now first, so you can undo it.</span>
+        ${pointsHtml()}
+      </div>
       <h2 class="section-t">Your data</h2>
       <div class="box">
         <span class="sub">Save a backup file now and then if you like — you can restore it into any account. A cost list file adds its costs to your budget.</span>
@@ -978,9 +994,26 @@
     const p = S.profile, d = draft, x = editorTexts();
     const listName = d.list === 'home' ? (single() ? 'Costs' : 'Local') : CUR[p.other].country;
     const debtOn = d.left !== '';
+    const old = d.id ? S.items.find(x => x.id === d.id) : null, mk = vm();
+    const fromHere = old && old.rep !== 'once' && startKey(old) < mk;
+    const hint = fromHere ? `<p class="ed-hint">Changes apply from ${monName(mk)} on. ${monName(prevKey(mk))} and earlier stay as they are.</p>` : '';
+    const lists = single() ? '' : `<div class="fld"><span>List</span><div class="seg seg-list" role="group" aria-label="List">${[['other', CUR[p.other].country], ['home', 'Local']].map(([k, l]) => `<button type="button" data-act="lst" data-list="${k}" class="sl-${k}" aria-pressed="${d.list === k}" title="${d.list === k ? 'On the ' + esc(l) + ' list' : 'Move this cost to the ' + esc(l) + ' list' + (fromHere ? ' from ' + monName(mk) + ' on' : '')}">${esc(l)}</button>`).join('')}</div></div>`;
+    const rmText = !old ? '' : fromHere || (old.rep !== 'once' && startKey(old) < mk)
+      ? `Remove ${esc(old.name)} from ${monName(mk)} on? ${monName(prevKey(mk))} and earlier keep it.`
+      : `Remove ${esc(old.name)}? It starts in ${monName(startKey(old) > mk ? startKey(old) : mk)}, so it's removed completely.`;
+    const actions = d.confirmRm
+      ? `<div class="rm-ask"><p>${rmText} A restore point is saved first.</p><div class="dlg-actions">
+          <button type="button" class="btn-ghost" data-act="rm-no" title="Keep this cost">Keep</button>
+          <button type="button" class="btn-danger" data-act="rm-yes" title="${fromHere ? 'Remove from ' + monName(mk) + ' and later months' : 'Remove this cost'}">Remove</button></div></div>`
+      : `<div class="dlg-actions">
+        ${d.id ? '<button type="button" class="btn-danger" data-act="remove" title="Remove this cost">Remove</button>' : ''}
+        <button type="button" class="btn-ghost" data-act="cancel">Cancel</button>
+        <button type="button" class="btn" data-act="save-item">Save</button>
+      </div>`;
     const curs = p.home === p.other || single() ? '' : `<div class="seg" role="group" aria-label="Currency">${[p.other, p.home].map(c => `<button type="button" data-act="cur" data-cur="${c}" aria-pressed="${d.cur === c}" aria-label="${esc(CUR[c].country)} currency">${esc(sym(c).trim())}</button>`).join('')}</div>`;
     $modal.innerHTML = `<div class="overlay" data-act="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
       <div class="dlg-head"><h2 id="dlg-t">${d.id ? 'Edit cost' : 'New cost'}</h2><span class="pill pill-${d.list}">${esc(listName)}</span></div>
+      ${hint}${lists}
       <label class="fld"><span>Name</span><input class="inp" id="d-name" value="${esc(d.name)}" placeholder="${d.list === 'home' ? 'e.g. Rent' : 'e.g. Family allowance'}" maxlength="60"></label>
       <div class="fld"><span>Amount each time</span>
         <div class="amt-row">${curs}<input class="inp num" id="d-amt" inputmode="decimal" value="${esc(d.subs ? subsTotal().toFixed(2) : d.amt)}" placeholder="0" style="text-align:right" aria-label="Amount"${d.subs ? ' readonly aria-readonly="true"' : ''}></div>
@@ -1005,11 +1038,7 @@
         <button type="button" class="chip" data-act="cnt" data-on="0" aria-pressed="${!d.countNow}">Leave out in ${esc(MON_LONG[vmFrom().getMonth()])}</button></div></div>
       <label class="chk chk-box"><input type="checkbox" id="d-opt"${d.optional ? ' checked' : ''}><span>Optional<small>Not counted each month until you switch it on for that month — for costs you don't pay every month.</small></span></label>
       <p class="err" id="d-err" hidden></p>
-      <div class="dlg-actions">
-        ${d.id ? '<button type="button" class="btn-danger" data-act="remove">Remove</button>' : ''}
-        <button type="button" class="btn-ghost" data-act="cancel">Cancel</button>
-        <button type="button" class="btn" data-act="save-item">Save</button>
-      </div>
+      ${actions}
     </div></div>`;
   }
 
@@ -1035,7 +1064,8 @@
       id: d.id || S.nextId++, list: d.list, name: d.name.trim(), amt, cur: d.cur, rep: d.rep, due: d.due,
       left: d.rep !== 'once' && d.left !== '' ? left : 0,
       paid: d.paid || [],
-      created: d.created || ymd(new Date(Math.min(today(), parse(d.due))))
+      // A cost added while looking at a later month starts in that month.
+      created: d.created || (vm() > monthKey(today()) ? vm() + '-01' : ymd(new Date(Math.min(today(), parse(d.due)))))
     };
     if (d.rep === 'every') {
       const ev = Math.floor(num(d.every));
@@ -1047,23 +1077,91 @@
     const cnt = Object.assign({}, d.count), mk = vm();
     if (d.countNow === !d.optional) delete cnt[mk]; else cnt[mk] = d.countNow;
     if (Object.keys(cnt).length) item.count = cnt;
-    const i = S.items.findIndex(x => x.id === item.id);
-    if (i >= 0) S.items[i] = item; else S.items.push(item);
+    const i = S.items.findIndex(x => x.id === item.id), old = i >= 0 ? S.items[i] : null;
+    if (old && old.until) item.until = old.until;
+    // A real change to a cost that started before this month: the old one stops last month and a copy carries on from here.
+    const shape = x => JSON.stringify([x.list, x.name, x.amt, x.cur, x.rep, x.due, x.left || 0, x.rep === 'every' ? x.every : 0, !!x.optional, x.subs || null]);
+    const split = old && old.rep !== 'once' && item.rep !== 'once' && startKey(old) < mk && shape(old) !== shape(item);
+    if (split) {
+      old.until = prevKey(mk);
+      item.id = S.nextId++;
+      item.created = mk + '-01';
+      S.items.splice(i + 1, 0, item);
+    } else if (i >= 0) S.items[i] = item; else S.items.push(item);
     save();
     closeEditor();
     render();
-    toast(i >= 0 ? 'Saved' : `Added ${item.name}`);
+    toast(split ? `Saved from ${monName(mk)} on` : i >= 0 ? 'Saved' : `Added ${item.name}`);
   }
 
   function removeItem() {
     const i = S.items.findIndex(x => x.id === draft.id);
     if (i < 0) return closeEditor();
+    const it = S.items[i], mk = vm();
+    addPoint('Before removing ' + it.name);
+    if (it.rep !== 'once' && startKey(it) < mk) {
+      // Earlier months keep it: it just stops last month.
+      const was = it.until;
+      it.until = prevKey(mk);
+      save(); closeEditor(); render();
+      toast(`Removed ${it.name} from ${monName(mk)} on`, { label: 'Undo', run: () => { if (was) it.until = was; else delete it.until; save(); render(); } });
+      return;
+    }
     const [gone] = S.items.splice(i, 1);
     save();
     closeEditor();
     render();
     undo = { item: gone, index: i };
     toast(`Removed ${gone.name}`, { label: 'Undo', run: () => { S.items.splice(undo.index, 0, undo.item); save(); render(); } });
+  }
+
+  // ---------- restore points ----------
+  // Copies of the budget kept inside the account: one a day, plus one before anything is removed or restored. 14 days.
+  const POINT_DAYS = 14, POINT_MAX = 24;
+  function pointData() {
+    const o = {};
+    for (const k of ['profile', 'items', 'rate', 'pay', 'sent', 'savings', 'nextId']) o[k] = S[k];
+    return JSON.parse(JSON.stringify(o));
+  }
+  function addPoint(why) {
+    if (!S.profile) return false;
+    const data = pointData(), cut = Date.now() - POINT_DAYS * 864e5;
+    const pts = (S.points || []).filter(x => x && x.at >= cut);
+    if (why === 'day' && pts[0] && JSON.stringify(pts[0].data) === JSON.stringify(data)) { S.points = pts; return false; }
+    S.points = [{ at: Date.now(), why, data }].concat(pts).slice(0, POINT_MAX);
+    return true;
+  }
+  function dayPoint() {
+    const d = ymd(today());
+    if ((S.points || []).some(x => x.why === 'day' && ymd(new Date(x.at)) === d)) return;
+    if (addPoint('day')) save();
+  }
+  function restorePoint(at) {
+    const pt = (S.points || []).find(x => x.at === at);
+    if (!pt) return;
+    addPoint('Before restoring');
+    const pts = S.points, data = JSON.parse(JSON.stringify(pt.data));
+    S = Object.assign(blank(), S, data, { points: pts, nextId: Math.max(S.nextId || 1, data.nextId || 1) });
+    confirmRp = null;
+    save();
+    rollover();
+    view = 'home';
+    render();
+    window.scrollTo(0, 0);
+    toast(`Restored to ${pointWhen(pt.at)}`);
+  }
+  function pointWhen(at) {
+    const d = new Date(at), n = daysBetween(new Date(d.toDateString()), today());
+    return (n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`) + ' ' + clock(at);
+  }
+  function pointsHtml() {
+    const pts = S.points || [];
+    if (!pts.length) return '<span class="sub">The first one is saved the next time PisoWise syncs.</span>';
+    return `<div class="rps">${pts.map(x => {
+      const n = (x.data.items || []).length, sure = confirmRp === x.at;
+      return `<div class="rp"><span class="rp-m"><b>${x.why === 'day' ? 'Start of the day' : esc(x.why)}</b><small>${esc(pointWhen(x.at))} · ${n} cost${n === 1 ? '' : 's'}</small></span>
+        <button type="button" class="${sure ? 'btn-danger' : 'btn-ghost'} rp-btn" data-act="rp" data-at="${x.at}" title="Put your budget back to how it was ${esc(pointWhen(x.at))}. Your budget now is saved first.">${sure ? 'Tap again' : 'Restore'}</button></div>`;
+    }).join('')}</div>`;
   }
 
   // Tick: marks the next unpaid due date this month as paid; once all are paid, a tap clears this month's ticks.
@@ -1151,7 +1249,7 @@
 
   // ---------- backup ----------
   function backup() {
-    const blob = new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(Object.assign({}, S, { points: undefined }), null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `pisowise-backup-${ymd(today())}.json`;
@@ -1195,7 +1293,9 @@
         const s = JSON.parse(r.result);
         if (s && (s.kind === 'pisowise-costs' || s.kind === 'budgetwise-costs') && Array.isArray(s.items)) return importCosts(s.items);
         if (!s || s.v !== 1 || !s.profile || !Array.isArray(s.items)) throw new Error('bad');
-        S = Object.assign(blank(), s);
+        addPoint('Before restoring a backup file');
+        const pts = S.points;
+        S = Object.assign(blank(), s, { points: pts });
         save();
         rollover();
         view = 'home';
@@ -1211,7 +1311,8 @@
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const act = b.dataset.act;
-    if (act === 'nav') { view = b.dataset.view; confirmReset = false; render(); window.scrollTo(0, 0); }
+    if (act === 'nav') { view = b.dataset.view; confirmReset = false; confirmRp = null; render(); window.scrollTo(0, 0); }
+    else if (act === 'rp') { const at = +b.dataset.at; if (confirmRp === at) restorePoint(at); else { confirmRp = at; render(); } }
     else if (act === 'tab') { tab = b.dataset.tab; render(); }
     else if (act === 'rate') refreshRate(true);
     else if (act === 'add') openEditor(null, b.dataset.list);
@@ -1308,7 +1409,10 @@
     const act = b.dataset.act;
     if (act === 'cancel') closeEditor();
     else if (act === 'save-item') saveItem();
-    else if (act === 'remove') removeItem();
+    else if (act === 'remove') { draft.confirmRm = true; renderEditor(); const el = document.querySelector('[data-act="rm-no"]'); if (el) el.focus(); }
+    else if (act === 'rm-no') { draft.confirmRm = false; renderEditor(); }
+    else if (act === 'rm-yes') removeItem();
+    else if (act === 'lst') { draft.list = b.dataset.list; renderEditor(); }
     else if (act === 'cur') { draft.cur = b.dataset.cur; renderEditor(); }
     else if (act === 'rep') { draft.rep = b.dataset.rep; renderEditor(); }
     else if (act === 'cnt') { draft.countNow = b.dataset.on === '1'; renderEditor(); }
