@@ -964,6 +964,19 @@
     if (n && !it) n.focus();
   }
   function closeEditor() { draft = null; $modal.innerHTML = ''; }
+  // Switching the currency converts the amount (and each line) at today's rate, e.g. A$100 → ₱4,000 at 40.
+  function switchCur(cur) {
+    const p = S.profile, d = draft, rate = rateValue();
+    if (cur === d.cur) return;
+    const conv = v => {
+      if (!rate || !hasNum(v)) return v;
+      const x = d.cur === p.home && cur === p.other ? num(v) * rate : d.cur === p.other && cur === p.home ? num(v) / rate : num(v);
+      return String(Math.round(x * 100) / 100);
+    };
+    if (d.subs) d.subs = d.subs.map(x => ({ name: x.name, amt: conv(x.amt) }));
+    else d.amt = conv(d.amt);
+    d.cur = cur;
+  }
   const subsTotal = () => (draft.subs || []).reduce((a, x) => a + num(x.amt), 0);
 
   function editorTexts() {
@@ -1010,7 +1023,7 @@
         <button type="button" class="btn-ghost" data-act="cancel">Cancel</button>
         <button type="button" class="btn" data-act="save-item">Save</button>
       </div>`;
-    const curs = p.home === p.other || single() ? '' : `<div class="seg" role="group" aria-label="Currency">${[p.other, p.home].map(c => `<button type="button" data-act="cur" data-cur="${c}" aria-pressed="${d.cur === c}" aria-label="${esc(CUR[c].country)} currency">${esc(sym(c).trim())}</button>`).join('')}</div>`;
+    const curs = p.home === p.other || single() ? '' : `<div class="seg" role="group" aria-label="Currency">${[p.other, p.home].map(c => `<button type="button" data-act="cur" data-cur="${c}" aria-pressed="${d.cur === c}" aria-label="${esc(CUR[c].country)} currency" title="${d.cur === c ? 'Amount in ' + esc(CUR[c].code || c) : 'Switch to ' + esc(sym(c).trim()) + ' — the amount converts at today\'s rate'}">${esc(sym(c).trim())}</button>`).join('')}</div>`;
     $modal.innerHTML = `<div class="overlay" data-act="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
       <div class="dlg-head"><h2 id="dlg-t">${d.id ? 'Edit cost' : 'New cost'}</h2><span class="pill pill-${d.list}">${esc(listName)}</span></div>
       ${hint}${lists}
@@ -1413,7 +1426,7 @@
     else if (act === 'rm-no') { draft.confirmRm = false; renderEditor(); }
     else if (act === 'rm-yes') removeItem();
     else if (act === 'lst') { draft.list = b.dataset.list; renderEditor(); }
-    else if (act === 'cur') { draft.cur = b.dataset.cur; renderEditor(); }
+    else if (act === 'cur') { switchCur(b.dataset.cur); renderEditor(); }
     else if (act === 'rep') { draft.rep = b.dataset.rep; renderEditor(); }
     else if (act === 'cnt') { draft.countNow = b.dataset.on === '1'; renderEditor(); }
     else if (act === 'sub-add') { draft.subs.push({ name: '', amt: '' }); renderEditor(); const el = document.querySelector(`[data-subn="${draft.subs.length - 1}"]`); if (el) el.focus(); }
