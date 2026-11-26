@@ -1331,8 +1331,9 @@
   // A change to the plans after that (new plan, deleted plan, paid off early) shows a banner until the cost is updated.
   const AP_GAPS = [['fortnight', 'Every 2 weeks'], ['month', 'Every month']];
   const r2 = v => Math.round(v * 100) / 100;
-  const apDate = (pl, i) => pl.gap === 'month' ? step(parse(pl.first), 'month', i) : addDays(parse(pl.first), 14 * i);
-  function apAmt(pl, i) { const c = Math.round(pl.total * 100), base = Math.floor(c / pl.n); return (i === pl.n - 1 ? c - base * (pl.n - 1) : base) / 100; }
+  // A plan from an uploaded payment list keeps each payment's own date and amount (dates, known); the others follow the plan.
+  const apDate = (pl, i) => pl.dates && pl.dates[i] ? parse(pl.dates[i]) : pl.gap === 'month' ? step(parse(pl.first), 'month', i) : addDays(parse(pl.first), 14 * i);
+  function apAmt(pl, i) { if (pl.known && pl.known[i] != null) return pl.known[i]; if (pl.each) return pl.each; const c = Math.round(pl.total * 100), base = Math.floor(c / pl.n); return (i === pl.n - 1 ? c - base * (pl.n - 1) : base) / 100; }
   function apPays(pl) {
     const out = [];
     for (let i = 0; i < pl.n; i++) { const d = apDate(pl, i); if (pl.off && d > parse(pl.off)) break; out.push({ k: pl.id + ':' + i, d, i, amt: apAmt(pl, i), pl }); }
@@ -1481,7 +1482,7 @@
       const end = pays.length ? pays[pays.length - 1].d : parse(pl.first), done = pays.filter(x => x.d < t).length, toGo = r2(pays.filter(x => x.d >= t).reduce((a, x) => a + x.amt, 0));
       const sub = pl.off ? `Paid off ${shortDate(parse(pl.off))}` : next ? `Payment ${next.i + 1} of ${pl.n} next: ${shortDate(next.d)} · ${money(next.amt, p.home)}` : `Finished ${shortDate(end)}`;
       const fin = pl.off || !next ? '' : `<small>${done} paid · ${money(toGo, p.home)} to go · finishes ${esc(shortDate(end))} ${end.getFullYear()}</small>`;
-      return `<div class="ap-plan${next || pl.off ? '' : ' ap-done'}"><span class="ap-t"><b>${esc(pl.store)}</b><small>${money(pl.total, p.home)} · ${pl.n} payments ${pl.gap === 'month' ? 'monthly' : 'every 2 weeks'}</small><small class="ap-nx">${esc(sub)}</small>${fin}</span>
+      return `<div class="ap-plan${next || pl.off ? '' : ' ap-done'}"><span class="ap-t"><b>${esc(pl.store)}</b><small>${money(pl.total, p.home)} · ${pl.n} payments ${pl.gap === 'month' ? 'monthly' : 'every 2 weeks'}${pl.order ? ` · order ${esc(pl.order)}` : ''}</small><small class="ap-nx">${esc(sub)}</small>${fin}</span>
         <button type="button" class="x-btn" data-act="ap-edit" data-id="${pl.id}" aria-label="Change ${esc(pl.store)}" title="Change this plan">${ICON.pen}</button>
         <button type="button" class="${sure ? 'btn-danger' : 'btn-ghost'} ap-sm" data-act="ap-del" data-id="${pl.id}" title="${sure ? 'Tap again to delete this plan' : 'Delete this plan'}">${sure ? 'Tap again' : 'Delete'}</button></div>`;
     }).join('');
@@ -1512,10 +1513,12 @@
     if (!f.store.trim()) return fail('Please enter the store.');
     if (!(total > 0)) return fail('Please enter the total price.');
     if (!f.first) return fail('Please pick the first payment date.');
-    if (!(n >= 1 && n <= 24)) return fail('Please enter 1 to 24 payments.');
+    if (!(n >= 1 && n <= 48)) return fail('Please enter 1 to 48 payments.');
     if (!S.bnpl) S.bnpl = [];
     const old = f.id ? S.bnpl.find(x => x.id === f.id) : null;
     const pl = { id: f.id || S.nextId++, store: f.store.trim(), total, n, gap: f.gap, first: f.first };
+    if (old && old.order) pl.order = old.order;
+    if (old && old.known && old.n === n && old.gap === f.gap && old.first === f.first && Math.abs(old.total - total) < 0.005) { pl.known = old.known; pl.dates = old.dates; pl.each = old.each; }
     if (f.off) pl.off = old && old.off ? old.off : ymd(today());
     if (old) S.bnpl[S.bnpl.indexOf(old)] = pl; else S.bnpl.push(pl);
     save(); render();
@@ -1581,34 +1584,81 @@
     if (m) { const mi = MON.findIndex(x => m[1].toLowerCase().startsWith(x.toLowerCase())); if (mi >= 0) return ymd(new Date(+m[3], mi, +m[2])); }
     return null;
   }
+  // Two kinds of file:
+  //  · one row per purchase: Store, Total, First payment, Payments, Every
+  //  · one row per payment (as Gemini makes from Afterpay's emails): Due Date, Merchant, Plan, Order #, Instalment ("2 of 4"), Amount
+  //    Rows of the same order make one plan; the payments in the file keep their own dates and amounts, the rest are
+  //    worked out (same amount, every 2 weeks for Pay in 4, monthly for Pay Monthly), so the plan runs to its last payment.
   function apImportCsv(text) {
     const rows = csvRows(text.replace(/^﻿/, ''));
     if (rows.length < 2) return { error: 'That file has no rows under the header.' };
-    const h = rows[0].map(x => x.toLowerCase());
-    const col = (...words) => h.findIndex(x => words.some(w => x.includes(w)));
-    const cS = col('store', 'merchant', 'shop', 'retailer', 'name'), cT = col('total', 'price', 'amount', 'order'), cD = col('first', 'date', 'purchase', 'bought', 'start');
-    const cN = col('payments', 'instal', 'number', 'count'), cE = col('every', 'freq', 'schedule', 'interval');
-    if (cS < 0 || cT < 0 || cD < 0) return { error: 'The file needs Store, Total and First payment columns.' };
+    const h = rows[0].map(x => x.toLowerCase().replace(/\s+/g, ' ').trim());
+    const find = (...names) => { for (const n of names) { const i = h.indexOf(n); if (i >= 0) return i; } for (const n of names) { const i = h.findIndex(x => x.includes(n)); if (i >= 0) return i; } return -1; };
+    const ofN = v => { const m = String(v || '').match(/(\d+)\s*(?:of|\/)\s*(\d+)/i); return m ? { k: +m[1], n: +m[2] } : null; };
+    const isTotalRow = r => r.some(c => /^(grand )?total$/i.test(c));
     if (!S.bnpl) S.bnpl = [];
-    let added = 0, same = 0, bad = 0;
+    let added = 0, same = 0, updated = 0, bad = 0, fixed = 0;
+    const cI = find('instalment', 'installment', 'payment number', 'payment no');
+    if (cI >= 0 && rows.slice(1).some(r => ofN(r[cI]))) {
+      const cM = find('merchant', 'store', 'shop', 'retailer'), cO = find('order #', 'order number', 'order id', 'order no', 'order');
+      const cA = find('amount', 'instalment amount', 'payment amount'), cD = find('due date', 'date', 'due'), cP = find('plan', 'type');
+      if (cM < 0 || cA < 0 || cD < 0) return { error: 'The file needs Merchant, Instalment, Amount and Due Date columns.' };
+      const groups = new Map();
+      for (const r of rows.slice(1)) {
+        if (isTotalRow(r)) continue;
+        const kn = ofN(r[cI]), store = (r[cM] || '').slice(0, 40), d = csvDate(r[cD]), amt = r2(num(r[cA])), order = cO >= 0 ? String(r[cO] || '').replace(/[^0-9A-Za-z-]/g, '') : '';
+        if (!kn || !store || !d || !(amt > 0) || kn.k < 1 || kn.k > kn.n || kn.n > 48) { bad++; continue; }
+        const key = order || store.toLowerCase() + '|' + kn.n;
+        const g = groups.get(key) || { store, order, n: kn.n, gap: cP >= 0 && /month/i.test(r[cP] || '') ? 'month' : 'fortnight', pays: {} };
+        g.pays[kn.k - 1] = { d, amt };
+        groups.set(key, g);
+      }
+      for (const g of groups.values()) {
+        // A plan from an earlier upload that took the order number as its price: replace it.
+        if (g.order) S.bnpl = S.bnpl.filter(x => { const broke = !x.order && String(Math.round(x.total)) === g.order; if (broke) fixed++; return !broke; });
+        const old = S.bnpl.find(x => g.order ? x.order === g.order : !x.order && x.store.toLowerCase() === g.store.toLowerCase() && x.n === g.n && x.known);
+        const known = Object.assign({}, old && old.known), dates = Object.assign({}, old && old.dates);
+        for (const [i, x] of Object.entries(g.pays)) { known[i] = x.amt; dates[i] = x.d; }
+        const idx = Object.keys(dates).map(Number).sort((a, b) => a - b), i0 = idx[0], d0 = parse(dates[i0]);
+        const first = ymd(g.gap === 'month' ? step(d0, 'month', -i0) : addDays(d0, -14 * i0));
+        const notLast = idx.filter(i => i < g.n - 1), each = known[notLast.length ? notLast[notLast.length - 1] : idx[idx.length - 1]];
+        const pl = { id: old ? old.id : S.nextId++, store: g.store, n: g.n, gap: g.gap, first, each, known, dates };
+        if (g.order) pl.order = g.order;
+        if (old && old.off) pl.off = old.off;
+        pl.total = r2(Array.from({ length: g.n }, (_, i) => known[i] != null ? known[i] : each).reduce((a, v) => a + v, 0));
+        if (!old) { S.bnpl.push(pl); added++; continue; }
+        const was = JSON.stringify([old.n, old.gap, old.first, old.total, old.known, old.dates]);
+        S.bnpl[S.bnpl.indexOf(old)] = pl;
+        if (was === JSON.stringify([pl.n, pl.gap, pl.first, pl.total, pl.known, pl.dates])) same++; else updated++;
+      }
+      return { added, same, updated, bad, fixed };
+    }
+    const cS = find('store', 'merchant', 'shop', 'retailer', 'name'), cT = find('total', 'price', 'order total', 'purchase amount', 'amount');
+    const cD = find('first payment', 'first', 'purchase date', 'date', 'bought', 'start');
+    const cN = find('payments', 'number of payments', 'instalments', 'installments', 'count'), cE = find('every', 'frequency', 'freq', 'schedule', 'interval', 'plan');
+    if (cS < 0 || cT < 0 || cD < 0) return { error: 'The file needs Store, Total and First payment columns.' };
     for (const r of rows.slice(1)) {
+      if (isTotalRow(r)) continue;
       const store = (r[cS] || '').slice(0, 40), total = r2(num(r[cT])), first = csvDate(r[cD]);
-      const n = cN >= 0 && hasNum(r[cN]) ? Math.floor(num(r[cN])) : 4, gap = cE >= 0 && /month/i.test(r[cE] || '') ? 'month' : 'fortnight';
-      if (!store || !(total > 0) || !first || !(n >= 1 && n <= 24)) { bad++; continue; }
+      const nv = cN >= 0 ? r[cN] : '', kn = ofN(nv), n = kn ? kn.n : /^\s*\d+\s*$/.test(nv || '') ? +nv : 4;
+      const gap = cE >= 0 && /month/i.test(r[cE] || '') ? 'month' : 'fortnight';
+      if (!store || !(total > 0) || !first || !(n >= 1 && n <= 48)) { bad++; continue; }
       if (S.bnpl.some(x => x.store.toLowerCase() === store.toLowerCase() && Math.abs(x.total - total) < 0.005 && x.first === first)) { same++; continue; }
       S.bnpl.push({ id: S.nextId++, store, total, n, gap, first });
       added++;
     }
-    return { added, same, bad };
+    return { added, same, updated, bad, fixed };
   }
   function apCsvFile(file) {
     const rd = new FileReader();
     rd.onload = () => {
+      addPoint('Before uploading Afterpay plans');
       const res = apImportCsv(String(rd.result || ''));
       if (res.error) { toast(res.error); return; }
-      if (res.added) { addPoint('Before uploading Afterpay plans'); save(); render(); }
+      if (res.added || res.updated || res.fixed) { save(); render(); }
       if (dlg && dlg.kind === 'ap-plans') renderDlg();
-      const parts = [res.added ? `Added ${res.added} plan${res.added === 1 ? '' : 's'}` : 'No new plans', res.same ? `${res.same} already there` : '', res.bad ? `${res.bad} row${res.bad === 1 ? '' : 's'} skipped (missing store, total or date)` : ''].filter(Boolean);
+      const parts = [res.added ? `Added ${res.added} plan${res.added === 1 ? '' : 's'}` : 'No new plans', res.updated ? `${res.updated} updated` : '', res.fixed ? `${res.fixed} wrong plan${res.fixed === 1 ? '' : 's'} replaced` : '', res.same ? `${res.same} already there` : '', res.bad ? `${res.bad} row${res.bad === 1 ? '' : 's'} skipped (missing store, total or date)` : ''].filter(Boolean);
+      if (res.added || res.updated || res.fixed) { const ends = (S.bnpl || []).map(pl => { const ps = apPays(pl); return ps.length ? ps[ps.length - 1].d : null; }).filter(Boolean); if (ends.length) parts.push('all finished ' + shortDate(new Date(Math.max(...ends))) + ' ' + new Date(Math.max(...ends)).getFullYear()); }
       toast(parts.join(' · '));
     };
     rd.readAsText(file);
