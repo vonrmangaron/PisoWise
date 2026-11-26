@@ -1573,7 +1573,7 @@
     return rows.map(r => r.map(c => c.trim())).filter(r => r.some(c => c));
   }
   function csvDate(v) {
-    v = String(v || '').trim();
+    v = String(v || '').trim().replace(/^(?:[~≈*]|approx\.?|about|est\.?)\s*/i, ''); // '~Sun, 20 Dec 2026' = an approximate date
     let m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
     if (m) return ymd(new Date(+m[1], m[2] - 1, +m[3]));
     m = v.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/); // day/month/year (Australian order)
@@ -1606,7 +1606,7 @@
       const groups = new Map();
       for (const r of rows.slice(1)) {
         if (isTotalRow(r)) continue;
-        const kn = ofN(r[cI]), store = (r[cM] || '').slice(0, 40), d = csvDate(r[cD]), amt = r2(num(r[cA])), order = cO >= 0 ? String(r[cO] || '').replace(/[^0-9A-Za-z-]/g, '') : '';
+        const kn = ofN(r[cI]), store = (r[cM] || '').slice(0, 40), d = csvDate(r[cD]) || h.map((x, i) => /date|due/.test(x) ? csvDate(r[i]) : null).find(Boolean), amt = r2(num(r[cA])), order = cO >= 0 ? String(r[cO] || '').replace(/[^0-9A-Za-z-]/g, '') : '';
         if (!kn || !store || !d || !(amt > 0) || kn.k < 1 || kn.k > kn.n || kn.n > 48) { bad++; continue; }
         const key = order || store.toLowerCase() + '|' + kn.n;
         const g = groups.get(key) || { store, order, n: kn.n, gap: cP >= 0 && /month/i.test(r[cP] || '') ? 'month' : 'fortnight', pays: {} };
