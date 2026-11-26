@@ -663,3 +663,18 @@ button.ap-x:hover { background: var(--hover); color: var(--red); }
 .wrap:has(~ .fab) { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 160px); }
 body:has(.fab) #toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 152px); }
 @media (min-width: 1100px) { body:has(.fab) #toast { bottom: 100px; } }
+
+/* Afterpay lines: paid tick (line stays), paid separately (stays, not in the total) */
+.subl.ap-l { gap: 8px; }
+.ap-tk { width: 24px; height: 24px; flex: none; border-radius: 50%; border: 2px solid var(--field-line); background: var(--surface); color: transparent; display: flex; align-items: center; justify-content: center; padding: 0; }
+.ap-tk svg { width: 13px; height: 13px; }
+button.ap-tk:hover { border-color: var(--home); color: var(--home); }
+.ap-tk.on { background: var(--home); border-color: var(--home); color: var(--surface); }
+.ap-tk.none { border-color: transparent; background: transparent; }
+.subl.ap-l.is-paid > span:nth-child(2), .subl.ap-l.is-paid > span:nth-child(3) { color: var(--muted); }
+.subl.ap-l.is-sep > span:nth-child(3) { color: var(--muted); text-decoration: line-through; }
+.subl.ap-l .tag-opt { margin-left: 4px; }
+.bl-main.is-sep .bl-name { color: var(--muted); }
+.subl.ap-l > .ap-tk { flex: none; }
+.subl.ap-l > span:nth-child(2) { flex: 1; min-width: 0; text-align: left; }
+.subl.ap-l > span.ap-tk.none { flex: none; }
