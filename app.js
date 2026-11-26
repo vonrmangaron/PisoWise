@@ -1413,29 +1413,45 @@
     const it = ch[0], m = monName(monthKey(parse(it.bnpl.from)));
     return `<div class="ap-bell" role="status"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span>Afterpay changed since you added ${esc(m)}'s cost${ch.length > 1 ? ` (+${ch.length - 1} more)` : ''}</span><button type="button" class="link" data-act="ap-review" data-id="${it.id}" title="See what changed and update the cost">Review</button></div>`;
   }
+  const apUpBtn = cls => `<label class="${cls}" title="Upload a CSV of Afterpay purchases: Store, Total, First payment, Payments, Every. Plans already saved are skipped."><input type="file" class="ap-csv-in" accept=".csv,text/csv,text/plain" hidden>Upload CSV</label>`;
+  // Every pay period after this one until the last Afterpay payment: what each takes, and when it's all finished.
+  function apAheadHtml(N) {
+    const p = S.profile, all = (S.bnpl || []).flatMap(pl => apPays(pl)).filter(x => x.d > N);
+    if (!all.length) return '';
+    const dd = d => `${d.getDate()} ${MON[d.getMonth()]}`, last = all.reduce((a, x) => x.d > a ? x.d : a, all[0].d), rows = [];
+    for (let A = N, g = 0; A < last && g < 36; g++) {
+      const B = apNext(A);
+      if (!B) break;
+      const xs = all.filter(x => x.d > A && x.d <= B).sort((a, b) => a.d - b.d);
+      if (xs.length) rows.push(`<div class="ap-ah"><span class="ap-ah-p">${dd(A)} → ${dd(B)}</span><b class="num">${money(r2(xs.reduce((a, x) => a + x.amt, 0)), p.home)}</b><small>${xs.map(x => `${esc(x.pl.store.slice(0, 16))} ${x.i + 1}/${x.pl.n}${x.i === x.pl.n - 1 ? ' (last)' : ''}`).join(' · ')}</small></div>`);
+      A = B;
+    }
+    return `<div class="ap-ahead"><div class="ap-foot"><span>Still owed after ${dd(N)}</span><b>${money(r2(all.reduce((a, x) => a + x.amt, 0)), p.home)} · ${all.length} payment${all.length === 1 ? '' : 's'}</b></div>
+      <div class="ap-fin">All Afterpay finished ${esc(shortDate(last))} ${last.getFullYear()}</div>${rows.join('')}</div>`;
+  }
   // Card on the Local list: what Afterpay takes from each payday in the month shown.
   function apCardHtml() {
     const p = S.profile, plans = S.bnpl || [];
-    if (!plans.length) return `<div class="ap-card ap-empty"><span class="ap-t"><b>Afterpay</b><small>Add your plans to see what to set aside each payday.</small></span><button type="button" class="btn-ghost ap-sm" data-act="ap-plans" title="Add your Afterpay plans">Add a plan</button></div>`;
+    if (!plans.length) return `<div class="ap-card ap-empty"><span class="ap-t"><b>Afterpay</b><small>Add your plans to see what to set aside each payday.</small></span><span class="ap-two"><button type="button" class="btn-ghost ap-sm" data-act="ap-plans" title="Add your Afterpay plans one by one">Add a plan</button>${apUpBtn('btn-ghost ap-sm ap-up')}</span></div>`;
     return paydays(vmFrom(), vmTo()).map(P => {
       const N = apNext(P);
       if (!N) return '';
       const it = apItem(P), mon = monName(monthKey(P)), dd = d => `${d.getDate()} ${MON[d.getMonth()]}`;
       const after = plans.flatMap(pl => apPays(pl).filter(x => x.d > N));
-      const owed = after.length ? `<div class="ap-foot"><span>Still owed after ${dd(N)}</span><b>${money(r2(after.reduce((a, x) => a + x.amt, 0)), p.home)} · ${after.length} payment${after.length === 1 ? '' : 's'}</b></div>` : '';
+      const owed = after.length ? apAheadHtml(N) : '';
       const head = (amt, sub) => `<div class="ap-head"><span class="ap-t"><small>Payday ${dd(P)} · next pay ${dd(N)}</small><b>Afterpay until next pay</b><small>${sub}</small></span><span class="ap-amt">${money(amt, p.home)}</span></div>`;
-      const plansBtn = `<button type="button" class="link ap-plans" data-act="ap-plans" title="Add, change or delete your Afterpay plans">Plans (${plans.length})</button>`;
+      const plansBtn = `${apUpBtn('link ap-up-l')}<button type="button" class="link ap-plans" data-act="ap-plans" title="Add, change or delete your Afterpay plans">Plans (${plans.length})</button>`;
       if (it) {
         const ch = apDiff(it).any;
-        return `<div class="ap-card">${head(it.amt, `In ${esc(mon)} costs as “${esc(it.name)}”`)}
+        return `<div class="ap-card"><div class="ap-links">${plansBtn}</div>${head(it.amt, `In ${esc(mon)} costs as “${esc(it.name)}”`)}
           ${ch ? `<div class="ap-warn"><span>Your plans changed since you added it.</span><button type="button" class="link" data-act="ap-review" data-id="${it.id}" title="See what changed and update the cost">Review</button></div>` : `<div class="ap-ok">${ICON.check}<span>Added to ${esc(mon)} costs · up to date</span></div>`}
-          ${owed}<div class="ap-links">${plansBtn}</div></div>`;
+          ${owed}</div>`;
       }
       const cur = apLines(P, N), tot = r2(cur.reduce((a, x) => a + x.amt, 0));
       const lines = cur.length ? `<div class="ap-lines">${cur.map(x => `<div class="subl"><span>${esc(x.name)}</span><span>${money(x.amt, p.home)}</span></div>`).join('')}</div>` : '';
-      return `<div class="ap-card">${head(tot, cur.length ? `${cur.length} payment${cur.length === 1 ? '' : 's'} to set aside` : 'Nothing due before your next pay')}${lines}
+      return `<div class="ap-card"><div class="ap-links">${plansBtn}</div>${head(tot, cur.length ? `${cur.length} payment${cur.length === 1 ? '' : 's'} to set aside` : 'Nothing due before your next pay')}${lines}
         ${cur.length ? `<button type="button" class="btn ap-btn" data-act="ap-add" data-from="${ymd(P)}" title="Make one cost, Afterpay, in ${esc(mon)} with these payments as its lines">${ICON.plus}Add to ${esc(mon)} costs</button>` : ''}
-        ${owed}<div class="ap-links">${plansBtn}</div></div>`;
+        ${owed}</div>`;
     }).join('');
   }
 
@@ -1462,8 +1478,10 @@
     const p = S.profile, f = dlg.form, t = today();
     const rows = (S.bnpl || []).map(pl => {
       const pays = apPays(pl), next = pays.find(x => x.d >= t), sure = dlg.sure === pl.id;
-      const sub = pl.off ? `paid off ${shortDate(parse(pl.off))}` : next ? `next ${shortDate(next.d)} · ${money(next.amt, p.home)} (${next.i + 1} of ${pl.n})` : 'all paid';
-      return `<div class="ap-plan"><span class="ap-t"><b>${esc(pl.store)}</b><small>${money(pl.total, p.home)} · ${pl.n} payments ${pl.gap === 'month' ? 'monthly' : 'every 2 weeks'}</small><small>${esc(sub)}</small></span>
+      const end = pays.length ? pays[pays.length - 1].d : parse(pl.first), done = pays.filter(x => x.d < t).length, toGo = r2(pays.filter(x => x.d >= t).reduce((a, x) => a + x.amt, 0));
+      const sub = pl.off ? `Paid off ${shortDate(parse(pl.off))}` : next ? `Payment ${next.i + 1} of ${pl.n} next: ${shortDate(next.d)} · ${money(next.amt, p.home)}` : `Finished ${shortDate(end)}`;
+      const fin = pl.off || !next ? '' : `<small>${done} paid · ${money(toGo, p.home)} to go · finishes ${esc(shortDate(end))} ${end.getFullYear()}</small>`;
+      return `<div class="ap-plan${next || pl.off ? '' : ' ap-done'}"><span class="ap-t"><b>${esc(pl.store)}</b><small>${money(pl.total, p.home)} · ${pl.n} payments ${pl.gap === 'month' ? 'monthly' : 'every 2 weeks'}</small><small class="ap-nx">${esc(sub)}</small>${fin}</span>
         <button type="button" class="x-btn" data-act="ap-edit" data-id="${pl.id}" aria-label="Change ${esc(pl.store)}" title="Change this plan">${ICON.pen}</button>
         <button type="button" class="${sure ? 'btn-danger' : 'btn-ghost'} ap-sm" data-act="ap-del" data-id="${pl.id}" title="${sure ? 'Tap again to delete this plan' : 'Delete this plan'}">${sure ? 'Tap again' : 'Delete'}</button></div>`;
     }).join('');
@@ -1659,6 +1677,7 @@
     if (e.target.closest('#setup')) syncSetup();
   });
   $app.addEventListener('change', e => {
+    if (e.target.classList.contains('ap-csv-in') && e.target.files[0]) { apCsvFile(e.target.files[0]); e.target.value = ''; return; }
     if (e.target.matches('[data-act="restore"]') && e.target.files[0]) restore(e.target.files[0]);
     else if (e.target.closest('#setup')) syncSetup();
   });
