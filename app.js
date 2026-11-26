@@ -40,6 +40,8 @@
     refresh: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
     check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
     plus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+    up: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>',
+    cal: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
     chev: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
     budget: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/></svg>',
     history: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
@@ -554,7 +556,7 @@
       <div class="tabs" role="tablist" aria-label="Budget lists">${tabs}</div>
       <div class="panel" id="panel" role="tabpanel" aria-labelledby="tab-${tab}">${body(tab)}</div>
       <div class="cols">${cols}</div>
-    </div>${navHtml()}`;
+    </div><button type="button" class="fab" data-act="fab" aria-label="Add a cost or Afterpay" title="Add a cost, upload an Afterpay CSV, or open Afterpay">${ICON.plus}</button>${navHtml()}`;
   }
 
   // Ring chart: each slice's share of base. Slice colours come from the theme.
@@ -589,6 +591,7 @@
     return `≈ <b>${money(v, p.other)}</b> at ${sym(p.other).trim()}${rate.toFixed(2)} · this month's list ${money(need, p.other)}<br>${!(num(dlg.amt) > 0) ? '' : Math.abs(diff) < 1 ? 'Covers the whole list.' : diff > 0 ? money(diff, p.other) + ' more than the list.' : money(-diff, p.other) + ' less than the list.'}`;
   }
   function renderDlg() {
+    if (dlg.kind === 'fab') { $modal.innerHTML = fabHtml(); return; }
     if (dlg.kind === 'ap-plans') { $modal.innerHTML = apPlansHtml(); return; }
     if (dlg.kind === 'ap-diff') { $modal.innerHTML = apDiffHtml(); return; }
     const p = S.profile, mk = vm(), t = vmFrom(), otherName = CUR[p.other].country;
@@ -1019,51 +1022,66 @@
     const rmText = !old ? '' : fromHere || (old.rep !== 'once' && startKey(old) < mk)
       ? `Remove ${esc(old.name)} from ${monName(mk)} on? ${monName(prevKey(mk))} and earlier keep it.`
       : `Remove ${esc(old.name)}? It starts in ${monName(startKey(old) > mk ? startKey(old) : mk)}, so it's removed completely.`;
-    const actions = d.confirmRm
+    // Phone: a full-screen page with Cancel · title · Save fixed at the top; the form scrolls up and down only.
+    const foot = !d.id ? '' : d.confirmRm
       ? `<div class="rm-ask"><p>${rmText} A restore point is saved first.</p><div class="dlg-actions">
           <button type="button" class="btn-ghost" data-act="rm-no" title="Keep this cost">Keep</button>
           <button type="button" class="btn-danger" data-act="rm-yes" title="${fromHere ? 'Remove from ' + monName(mk) + ' and later months' : 'Remove this cost'}">Remove</button></div></div>`
-      : `<div class="dlg-actions">
-        ${d.id ? '<button type="button" class="btn-danger" data-act="remove" title="Remove this cost">Remove</button>' : ''}
-        <button type="button" class="btn-ghost" data-act="cancel">Cancel</button>
-        <button type="button" class="btn" data-act="save-item">Save</button>
-      </div>`;
+      : `<button type="button" class="btn-danger sh-rm" data-act="remove" title="Remove this cost">Remove cost</button>`;
     const curs = p.home === p.other || single() ? '' : `<div class="seg" role="group" aria-label="Currency">${[p.other, p.home].map(c => `<button type="button" data-act="cur" data-cur="${c}" aria-pressed="${d.cur === c}" aria-label="${esc(CUR[c].country)} currency" title="${d.cur === c ? 'Amount in ' + esc(CUR[c].code || c) : 'Switch to ' + esc(sym(c).trim()) + ' — the amount converts at today\'s rate'}">${esc(sym(c).trim())}</button>`).join('')}</div>`;
-    $modal.innerHTML = `<div class="overlay" data-act="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
-      <div class="dlg-head"><h2 id="dlg-t">${d.id ? 'Edit cost' : 'New cost'}</h2><span class="pill pill-${d.list}">${esc(listName)}</span></div>
-      ${hint}${lists}
-      <label class="fld"><span>Name</span><input class="inp" id="d-name" value="${esc(d.name)}" placeholder="${d.list === 'home' ? 'e.g. Rent' : 'e.g. Family allowance'}" maxlength="60"></label>
-      <div class="fld"><span>Amount each time</span>
-        <div class="amt-row">${curs}<input class="inp num" id="d-amt" inputmode="decimal" value="${esc(d.subs ? subsTotal().toFixed(2) : d.amt)}" placeholder="0" style="text-align:right" aria-label="Amount"${d.subs ? ' readonly aria-readonly="true"' : ''}></div>
-        <small id="d-conv">${esc(x.conv)}</small>${d.subs ? '<small>= total of the lines below</small>' : ''}</div>
-      <div class="brk">
-        <label class="chk"><input type="checkbox" id="d-brk"${d.subs ? ' checked' : ''}><span>Break it down<small class="sub" style="display:block;font-weight:400">Add lines — the amount is their total</small></span></label>
-        ${d.subs ? `<div class="sublines">${d.subs.map((x, i) => `<div class="sl">
-            <input class="inp" data-subn="${i}" value="${esc(x.name)}" placeholder="What" maxlength="40" aria-label="Line ${i + 1} name">
-            <span class="prefix"><span>${esc(sym(d.cur).trim())}</span><input class="num" data-suba="${i}" inputmode="decimal" value="${esc(x.amt)}" placeholder="0" aria-label="Line ${i + 1} amount"></span>
-            <button type="button" class="x-btn" data-act="sub-del" data-i="${i}" aria-label="Remove line ${i + 1}" title="Remove this line">${ICON.x}</button>
-            ${x.bk ? `<small class="ap-meta sl-meta">${esc(apMeta(x.bk))}</small><label class="sl-sep" title="For a long plan you pay on its own (like Afterpay Monthly): it leaves this cost and gets its own monthly cost"><input type="checkbox" data-subsep="${i}"${x.sep ? ' checked' : ''}><span>Paid separately</span></label>` : ''}</div>`).join('')}
-          <button type="button" class="add-btn" data-act="sub-add" style="margin:0">${ICON.plus}Add a line</button></div>` : ''}
+    const anySep = d.subs && d.subs.some(x => x.bk);
+    const lines = d.subs ? `<div class="bls">
+        ${anySep ? '<p class="bl-note">Tick a line to pay that plan separately. It moves out of this cost into its own monthly cost.</p>' : ''}
+        ${d.subs.map((x, i) => `<div class="bl${x.bk ? ' has-sep' : ''}">
+          ${x.bk ? `<input type="checkbox" class="bl-sep" data-subsep="${i}"${x.sep ? ' checked' : ''} aria-label="Pay ${esc(x.name)} separately" title="Paid separately: this plan gets its own cost">` : ''}
+          <div class="bl-main"><input class="bl-name" data-subn="${i}" value="${esc(x.name)}" placeholder="What" maxlength="40" aria-label="Line ${i + 1} name">${x.bk ? `<small class="ap-meta">${esc(apMeta(x.bk))}</small>` : ''}</div>
+          <span class="bl-amt"><span>${esc(sym(d.cur).trim())}</span><input class="num" data-suba="${i}" inputmode="decimal" value="${esc(x.amt)}" placeholder="0" aria-label="Line ${i + 1} amount"></span>
+          <button type="button" class="bl-x" data-act="sub-del" data-i="${i}" aria-label="Remove line ${i + 1}" title="Remove this line">${ICON.x}</button>
+        </div>`).join('')}
+        <button type="button" class="bl-add" data-act="sub-add" title="Add another line">${ICON.plus}Add a line</button>
+      </div>` : '';
+    const monL = esc(MON_LONG[vmFrom().getMonth()]);
+    $modal.innerHTML = `<div class="overlay sheet-ov" data-act="scrim"><div class="dialog sheet" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
+      <header class="sh-bar">
+        <button type="button" class="sh-btn" data-act="cancel" title="Close without saving">Cancel</button>
+        <h2 id="dlg-t">${d.id ? 'Edit cost' : 'New cost'}</h2>
+        <button type="button" class="sh-btn sh-save" data-act="save-item" title="Save this cost">Save</button>
+      </header>
+      <div class="sh-body">
+        ${hint}
+        <section class="sh-sec"><h3>Details</h3><div class="sh-grp">
+          ${lists}
+          <label class="fld"><span>Name</span><input class="inp" id="d-name" value="${esc(d.name)}" placeholder="${d.list === 'home' ? 'e.g. Rent' : 'e.g. Family allowance'}" maxlength="60"></label>
+          <div class="fld"><span>${d.subs ? 'Total' : 'Amount each time'}</span>
+            <div class="amt-row">${curs}<input class="inp num" id="d-amt" inputmode="decimal" value="${esc(d.subs ? subsTotal().toFixed(2) : d.amt)}" placeholder="0" style="text-align:right" aria-label="Amount"${d.subs ? ' readonly aria-readonly="true"' : ''}></div>
+            <small id="d-conv">${esc(x.conv)}</small>${d.subs ? '<small>The total of the lines below</small>' : ''}</div>
+        </div></section>
+        <section class="sh-sec"><h3>Breakdown</h3><div class="sh-grp">
+          <label class="sh-row"><span><b>Break it down</b><small>Add lines; the amount is their total</small></span><input type="checkbox" class="sh-sw" id="d-brk"${d.subs ? ' checked' : ''}></label>
+          ${lines}
+        </div></section>
+        <section class="sh-sec"><h3>When</h3><div class="sh-grp">
+          <div class="fld"><span>Repeats</span><div class="chips">${REPEATS.map(([k, l]) => `<button type="button" class="chip" data-act="rep" data-rep="${k}" aria-pressed="${d.rep === k}">${l}</button>`).join('')}</div>
+            ${d.rep === 'every' ? `<label class="inline"><span>Every</span><input class="inp" id="d-every" inputmode="numeric" value="${esc(d.every)}" aria-label="Number of months"><span>months</span></label><small>From 2 to 24 months — e.g. 2 for every second month, 6 for twice a year.</small>` : ''}</div>
+          <label class="fld"><span>${d.rep === 'once' ? 'Due on' : 'Next due'}</span><input class="inp" type="date" id="d-due" value="${esc(d.due)}"><small id="d-next" class="ok">${esc(x.next)}</small></label>
+          ${d.rep === 'once' ? '' : `<label class="sh-row"><span><b>Debt or loan</b><small>It ends after a number of payments</small></span><input type="checkbox" class="sh-sw" id="d-debt"${debtOn ? ' checked' : ''}></label>
+            ${debtOn ? `<label class="inline"><span>Payments left, including the next one</span><input class="inp" id="d-left" inputmode="numeric" value="${esc(d.left)}"></label><small id="d-debt-t" class="debt-t">${esc(x.debt)}</small>` : ''}`}
+        </div></section>
+        <section class="sh-sec"><h3>${monL}</h3><div class="sh-grp">
+          <div class="chips cnt">
+            <button type="button" class="chip" data-act="cnt" data-on="1" aria-pressed="${d.countNow}">Count in ${monL}</button>
+            <button type="button" class="chip" data-act="cnt" data-on="0" aria-pressed="${!d.countNow}">Leave out in ${monL}</button></div>
+          <label class="sh-row"><span><b>Optional</b><small>Not counted each month until you switch it on for that month</small></span><input type="checkbox" class="sh-sw" id="d-opt"${d.optional ? ' checked' : ''}></label>
+        </div></section>
+        <p class="err" id="d-err" hidden></p>
+        ${foot}
       </div>
-      <div class="fld"><span>Repeats</span><div class="chips">${REPEATS.map(([k, l]) => `<button type="button" class="chip" data-act="rep" data-rep="${k}" aria-pressed="${d.rep === k}">${l}</button>`).join('')}</div>
-        ${d.rep === 'every' ? `<label class="inline"><span>Every</span><input class="inp" id="d-every" inputmode="numeric" value="${esc(d.every)}" aria-label="Number of months"><span>months</span></label><small>From 2 to 24 months — e.g. 2 for every second month, 6 for twice a year.</small>` : ''}</div>
-      <label class="fld"><span>${d.rep === 'once' ? 'Due on' : 'Next due'}</span><input class="inp" type="date" id="d-due" value="${esc(d.due)}"><small id="d-next" class="ok">${esc(x.next)}</small></label>
-      ${d.rep === 'once' ? '' : `<div class="debt-box">
-        <label class="chk"><input type="checkbox" id="d-debt"${debtOn ? ' checked' : ''}> Debt or loan — it ends</label>
-        ${debtOn ? `<label class="inline"><span>Payments left, including the next one</span><input class="inp" id="d-left" inputmode="numeric" value="${esc(d.left)}"></label><small id="d-debt-t" class="debt-t">${esc(x.debt)}</small>` : ''}
-      </div>`}
-      <div class="fld"><span>${esc(MON_LONG[vmFrom().getMonth()])}</span><div class="chips cnt">
-        <button type="button" class="chip" data-act="cnt" data-on="1" aria-pressed="${d.countNow}">Count in ${esc(MON_LONG[vmFrom().getMonth()])}</button>
-        <button type="button" class="chip" data-act="cnt" data-on="0" aria-pressed="${!d.countNow}">Leave out in ${esc(MON_LONG[vmFrom().getMonth()])}</button></div></div>
-      <label class="chk chk-box"><input type="checkbox" id="d-opt"${d.optional ? ' checked' : ''}><span>Optional<small>Not counted each month until you switch it on for that month — for costs you don't pay every month.</small></span></label>
-      <p class="err" id="d-err" hidden></p>
-      ${actions}
     </div></div>`;
   }
 
   function saveItem() {
     const d = draft, err = document.getElementById('d-err');
-    const fail = m => { err.textContent = m; err.hidden = false; };
+    const fail = m => { err.textContent = m; err.hidden = false; err.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
     let subs = null;
     if (d.subs) {
       subs = [];
@@ -1481,7 +1499,8 @@
   function apCardHtml() {
     apTidyNames();
     const p = S.profile, plans = S.bnpl || [];
-    if (!plans.length) return `<div class="ap-card ap-empty"><span class="ap-t"><b>Afterpay</b><small>Add your plans to see what to set aside each payday.</small></span><span class="ap-two"><button type="button" class="btn-ghost ap-sm" data-act="ap-plans" title="Add your Afterpay plans one by one">Add a plan</button>${apUpBtn('btn-ghost ap-sm ap-up')}</span></div>`;
+    if (!plans.length) return '';
+    if (false) return `<div class="ap-card ap-empty"><span class="ap-t"><b>Afterpay</b><small>Add your plans to see what to set aside each payday.</small></span><span class="ap-two"><button type="button" class="btn-ghost ap-sm" data-act="ap-plans" title="Add your Afterpay plans one by one">Add a plan</button>${apUpBtn('btn-ghost ap-sm ap-up')}</span></div>`;
     return paydays(vmFrom(), vmTo()).map(P => {
       const N = apNext(P);
       if (!N) return '';
@@ -1492,12 +1511,8 @@
       const plansBtn = `${apUpBtn('link ap-up-l')}<button type="button" class="link ap-plans" data-act="ap-plans" title="Add, change or delete your Afterpay plans">Plans (${plans.length})</button>`;
       if (it) {
         const ch = apDiff(it).any;
-        if (!ch && !apOpen.has(ymd(P))) {
-          const ends = plans.map(pl => { const ps = apPays(pl); return ps.length ? ps[ps.length - 1].d : null; }).filter(Boolean), end = ends.length ? new Date(Math.max(...ends)) : null;
-          return `<div class="ap-card ap-mini"><button type="button" class="ap-mini-b" data-act="ap-open" data-from="${ymd(P)}" aria-expanded="false" title="Show Afterpay details: each pay until the last payment">
-            <span class="ap-t"><b>Afterpay · ${money(it.amt, p.home)} ✓</b><small>In ${esc(mon)} costs · ${dd(P)} → ${dd(N)}${end ? ` · all done ${end.getDate()} ${MON[end.getMonth()]} ${end.getFullYear()}` : ''}</small></span>${ICON.chev}</button><span class="ap-mini-l">${apUpBtn('link ap-up-l')}<button type="button" class="link ap-plans" data-act="ap-plans" title="Add, change or delete your Afterpay plans">Plans (${plans.length})</button></span></div>`;
-        }
-        return `<div class="ap-card"><div class="ap-links">${ch ? '' : `<button type="button" class="link" data-act="ap-open" data-from="${ymd(P)}" title="Fold the Afterpay card">Hide</button>`}${plansBtn}</div>${head(it.amt, `In ${esc(mon)} costs as “${esc(it.name)}”`)}
+        if (!ch) return ''; // added and up to date: the cost itself has the breakdown; the + button has the rest
+        return `<div class="ap-card"><div class="ap-links">${plansBtn}</div>${head(it.amt, `In ${esc(mon)} costs as “${esc(it.name)}”`)}
           ${ch ? `<div class="ap-warn"><span>Your plans changed since you added it.</span><button type="button" class="link" data-act="ap-review" data-id="${it.id}" title="See what changed and update the cost">Review</button></div>` : `<div class="ap-ok">${ICON.check}<span>Added to ${esc(mon)} costs · up to date</span></div>`}
           ${owed}</div>`;
       }
@@ -1509,6 +1524,30 @@
     }).join('');
   }
 
+  function apScheduleHtml() {
+    const p = S.profile, t = today(), all = (S.bnpl || []).flatMap(pl => apPays(pl)).filter(x => x.d >= t);
+    if (!all.length) return '';
+    const dd = d => `${d.getDate()} ${MON[d.getMonth()]}`, last = all.reduce((a, x) => x.d > a ? x.d : a, all[0].d), rows = [];
+    let A = paydays(addDays(t, -400), t).pop() || t;
+    for (let g = 0; A < last && g < 40; g++) {
+      const B = apNext(A);
+      if (!B) break;
+      const xs = all.filter(x => x.d > A && x.d <= B || (g === 0 && x.d.getTime() === A.getTime())).sort((a, b) => a.d - b.d);
+      if (xs.length) rows.push(`<div class="ap-ah"><span class="ap-ah-p">${dd(A)} → ${dd(B)}</span><b class="num">${money(r2(xs.reduce((a, x) => a + x.amt, 0)), p.home)}</b><small>${xs.map(x => `${esc(x.pl.store.slice(0, 16))} ${x.i + 1}/${x.pl.n}${x.i === x.pl.n - 1 ? ' (last)' : ''}${x.pl.sep ? ' · own cost' : ''}`).join(' · ')}</small></div>`);
+      A = B;
+    }
+    return `<div class="ap-sum"><div><small>Still to pay</small><b class="num">${money(r2(all.reduce((a, x) => a + x.amt, 0)), p.home)}</b><small>${all.length} payment${all.length === 1 ? '' : 's'}</small></div><div><small>All finished</small><b>${dd(last)} ${last.getFullYear()}</b><small>${esc(DOW_LONG[last.getDay()])}</small></div></div>
+      <button type="button" class="ap-ah-tg" data-act="ap-ahead" aria-expanded="${apAheadOn}" title="${apAheadOn ? 'Hide' : 'Show'} what each pay needs until the last payment"><span>Each pay until the last payment</span>${ICON.chev}</button>${apAheadOn ? `<div class="ap-ahead">${rows.join('')}</div>` : ''}`;
+  }
+  // ----- the + button: add a cost, upload an Afterpay CSV, open Afterpay -----
+  function fabHtml() {
+    const listName = tab === 'other' && !single() ? CUR[S.profile.other].country : single() ? 'Costs' : 'Local';
+    return `<div class="overlay fab-ov" data-act="scrim"><div class="fab-menu" role="menu" aria-label="Add">
+      <button type="button" role="menuitem" class="fab-i" data-act="fab-add" title="Add a cost to ${esc(listName)}"><span class="fab-ic">${ICON.plus}</span><span><b>Add a cost</b><small>${esc(listName)}</small></span></button>
+      <label role="menuitem" class="fab-i" title="Upload a CSV of Afterpay payments or purchases"><input type="file" class="ap-csv-in" accept=".csv,text/csv,text/plain" hidden><span class="fab-ic">${ICON.up}</span><span><b>Upload Afterpay CSV</b><small>Adds or updates your plans</small></span></label>
+      <button type="button" role="menuitem" class="fab-i" data-act="fab-ap" title="Your Afterpay plans and what each pay needs"><span class="fab-ic">${ICON.cal}</span><span><b>Afterpay</b><small>${(S.bnpl || []).length ? `${S.bnpl.length} plan${S.bnpl.length === 1 ? '' : 's'} · schedule` : 'Add your plans'}</small></span></button>
+    </div></div>`;
+  }
   // ----- Afterpay dialogs: plans list + add/edit form, and "what changed" -----
   function apOpenPlans(form) { dlg = { kind: 'ap-plans', form: form || null, sure: null }; renderDlg(); }
   function apNewForm(pl) {
@@ -1556,7 +1595,9 @@
         <label class="add-btn ap-up" style="margin:0" title="Upload a CSV file with columns Store, Total, First payment, Payments, Every. Plans already saved are skipped."><input type="file" id="ap-csv" accept=".csv,text/csv,text/plain" hidden>Upload CSV</label></div>
         <small class="sub">CSV columns: Store, Total, First payment, Payments (4), Every (2 weeks or month).</small>`;
     return `<div class="overlay" data-act="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
-      <div class="dlg-head"><h2 id="dlg-t">Afterpay plans</h2><button type="button" class="x-btn" data-act="cancel" aria-label="Close" title="Close">${ICON.x}</button></div>
+      <div class="dlg-head"><h2 id="dlg-t">Afterpay</h2><button type="button" class="x-btn" data-act="cancel" aria-label="Close" title="Close">${ICON.x}</button></div>
+      ${f ? '' : apScheduleHtml()}
+      ${rows ? '<h3 class="ap-h3">Plans</h3>' : ''}
       ${rows ? `<div class="ap-plist">${rows}</div>` : '<p class="sub">No plans yet. Add each Afterpay purchase once — PisoWise works out every payment.</p>'}
       ${form}
     </div></div>`;
@@ -1760,6 +1801,7 @@
     if (act === 'swipe-del') { swOpen = null; removeItem(+b.dataset.id); return; }
     if (act === 'ap-open') { const k = b.dataset.from; if (apOpen.has(k)) apOpen.delete(k); else apOpen.add(k); render(); return; }
     if (act === 'ap-ahead') { apAheadOn = !apAheadOn; render(); return; }
+    if (act === 'fab') { dlg = { kind: 'fab' }; renderDlg(); return; }
     if (act === 'nav') { view = b.dataset.view; confirmReset = false; confirmRp = null; render(); window.scrollTo(0, 0); }
     else if (act === 'rp') { const at = +b.dataset.at; if (confirmRp === at) restorePoint(at); else { confirmRp = at; render(); } }
     else if (act === 'tab') { tab = b.dataset.tab; render(); }
@@ -1830,6 +1872,8 @@
       const b = e.target.closest('[data-act]');
       if (!b || b.disabled) return;
       const act = b.dataset.act;
+      if (dlg.kind === 'fab') { if (act === 'fab-add') { closeDlg(); openEditor(null, tab === 'other' && !single() ? 'other' : 'home'); } else if (act === 'fab-ap') apOpenPlans(); return; }
+      if (dlg.kind === 'ap-plans' && act === 'ap-ahead') { apAheadOn = !apAheadOn; renderDlg(); return; }
       if (dlg.kind === 'ap-plans' && act !== 'cancel') {
         if (act === 'ap-new') { dlg.form = apNewForm(); dlg.sure = null; renderDlg(); const el = document.getElementById('ap-store'); if (el) el.focus(); }
         else if (act === 'ap-edit') { const pl = S.bnpl.find(x => x.id === +b.dataset.id); if (pl) { dlg.form = apNewForm(pl); dlg.sure = null; renderDlg(); } }
@@ -1911,7 +1955,7 @@
   });
   $modal.addEventListener('change', e => {
     if (dlg) {
-      if (e.target.id === 'ap-csv' && e.target.files[0]) { apCsvFile(e.target.files[0]); return; }
+      if ((e.target.id === 'ap-csv' || e.target.classList.contains('ap-csv-in')) && e.target.files[0]) { if (dlg.kind === 'fab') { closeDlg(); if (!single()) tab = 'home'; } apCsvFile(e.target.files[0]); return; }
       if (e.target.id === 'sent-tick') dlg.tick = e.target.checked;
       if (e.target.id === 'save-done') { dlg.done = e.target.checked; const ok = document.querySelector('[data-act="save-ok"]'); if (ok) ok.disabled = !dlg.done; }
       return;
