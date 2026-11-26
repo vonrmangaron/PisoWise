@@ -561,3 +561,29 @@ button.ap-x:hover { background: var(--hover); color: var(--red); }
 .ap-nx { color: var(--ink2) !important; font-weight: 600; }
 .ap-plan.ap-done .ap-t { opacity: .65; }
 @media (max-width: 380px) { .ap-card.ap-empty { flex-direction: column; align-items: stretch; } }
+
+/* Afterpay: folded card, Coming up toggle, payment info beside a line, paid separately */
+.ap-card.ap-mini { flex-direction: row; align-items: center; gap: 10px; padding: 8px 12px 8px 8px; }
+.ap-mini-b { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; color: inherit; text-align: left; padding: 6px; border-radius: 8px; }
+.ap-mini-b:hover { background: var(--hover); }
+.ap-mini-b .ap-t { flex: 1; }
+.ap-mini-b svg { flex: none; color: var(--muted); }
+.ap-mini .ap-up-l { flex: none; }
+.ap-ah-tg { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 40px; margin-top: 2px; padding: 0 2px; border: 0; border-top: 1px dashed var(--line2); background: transparent; color: var(--ink2); font-weight: 600; font-size: 13px; text-align: left; }
+.ap-ah-tg svg { color: var(--muted); transition: transform .15s; }
+.ap-ah-tg[aria-expanded="true"] svg { transform: rotate(180deg); }
+.ap-meta { color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; }
+.sl-meta { grid-column: 1 / 2; margin: -2px 0 0 2px; }
+.sl-sep { grid-column: 2 / -1; display: flex; align-items: center; gap: 6px; justify-content: flex-end; font-size: 12px; color: var(--ink2); margin-top: -2px; }
+.sl-sep input { width: 16px; height: 16px; margin: 0; }
+.sublines .sl { row-gap: 2px; padding-bottom: 6px; border-bottom: 1px dashed var(--line2); }
+
+/* Swipe a cost row left to delete it */
+.row-w { position: relative; overflow: hidden; }
+.row-w > :not(.swipe-del) { position: relative; z-index: 1; transform: translateX(var(--sx, 0px)); transition: transform .2s ease; }
+.row-w.swiping > :not(.swipe-del) { transition: none; }
+.row-w.swiped { --sx: -88px; }
+.swipe-del { position: absolute; top: 0; right: 0; bottom: 0; width: 88px; z-index: 0; border: 0; background: var(--red); color: #fff; font-weight: 700; font-size: 14px; visibility: hidden; }
+.row-w.swiping .swipe-del, .row-w.swiped .swipe-del { visibility: visible; }
+.ap-mini-l { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; }
+.ap-mini-l .link { font-size: 13px; padding: 0; }

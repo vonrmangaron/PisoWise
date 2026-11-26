@@ -64,6 +64,7 @@
   let dlg = null;
   let saveDraft = null; // amount typed in Overview › To savings, not saved yet
   let openSubs = new Set(); // costs whose breakdown is open in the list
+  let apOpen = new Set(), apAheadOn = false; // Afterpay cards opened (by payday) and the Coming up list
   let viewMonth = null;  // month shown on the Budget screen ('YYYY-MM'); null = this month
   let confirmReset = false;
   let confirmRp = null; // restore point waiting for a second tap
@@ -497,7 +498,8 @@
         const subsBtn = subsN ? `<button type="button" class="exp${subsOpen ? ' on' : ''}" data-act="subs" data-id="${it.id}" aria-expanded="${!!subsOpen}" aria-label="${subsOpen ? 'Hide' : 'Show'} what's in ${esc(it.name)}">${ICON.chev}</button>` : '';
         const subsList = subsOpen && it.bnpl ? apSubsHtml(it) : subsOpen ? `<div class="subs">${it.subs.map(x => `<div class="subl"><span>${esc(x.name)}</span><span>${money(x.amt, it.cur)}</span></div>`).join('')}<div class="subl t"><span>Total</span><span>${money(it.amt, it.cur)}</span></div></div>` : '';
         const sw = n ? `<button type="button" class="sw${off ? '' : ' on'}" data-act="count" data-id="${it.id}" role="switch" aria-checked="${!off}" aria-label="Count ${esc(it.name)} in ${esc(MON_LONG[mon])}" title="${off ? 'Not counted in ' : 'Counted in '}${esc(MON_LONG[mon])}"><i></i></button>` : '';
-        if (off) return `<div class="row-w is-off">${sw}<button type="button" class="row has-tick" data-act="edit" data-id="${it.id}">
+        const del = `<button type="button" class="swipe-del" data-act="swipe-del" data-id="${it.id}" tabindex="-1" aria-label="Delete ${esc(it.name)}">Delete</button>`;
+        if (off) return `<div class="row-w is-off">${del}${sw}<button type="button" class="row has-tick" data-act="edit" data-id="${it.id}">
           <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${esc(dueDesc(it))}</span>${it.optional ? '<span class="tag-opt">Optional</span>' : ''}</span>
           <span class="row-amt"><b>${money(it.amt * n, it.cur)}</b><small class="due">not counted</small></span></button>${subsBtn}<span class="tick none" aria-hidden="true"></span></div>${subsList}`;
         const np = occ.filter(d => isPaid(it, d)).length, allPaid = n > 0 && np === n;
@@ -508,7 +510,7 @@
           : `<small class="due${dd !== null && dd <= 3 ? ' urgent' : ''}">${nd ? 'due ' + inDays(dd) : ds ? 'paid off' : 'done'}</small>`;
         const conv = it.cur !== p.home ? (rate ? `<small>≈ ${money(it.amt / rate, p.home)}</small>` : '<small>needs a rate</small>') : '';
         const debtTag = ds ? `<span class="tag-debt">${ds.remaining ? `${ds.remaining} left · ends ${MON[ds.end.getMonth()]} ${ds.end.getFullYear()}` : 'Paid off'}</span>` : '';
-        return `<div class="row-w${allPaid ? ' is-paid' : ''}">${sw}<button type="button" class="row${nd || n ? '' : ' done'}${sw ? ' has-tick' : ''}" data-act="edit" data-id="${it.id}">
+        return `<div class="row-w${allPaid ? ' is-paid' : ''}">${del}${sw}<button type="button" class="row${nd || n ? '' : ' done'}${sw ? ' has-tick' : ''}" data-act="edit" data-id="${it.id}">
           ${sw ? '' : ini}
           <span class="row-main"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${esc(dueDesc(it))}${n > 1 ? ` · ${n}× this month` : ''}${subsN ? ` · ${subsN} item${subsN === 1 ? '' : 's'}` : ''}</span>${debtTag}${it.optional ? '<span class="tag-opt">Optional</span>' : ''}</span>
           <span class="row-amt"><b>${money(it.amt, it.cur)}</b>${conv}${status}</span>
@@ -1039,7 +1041,8 @@
         ${d.subs ? `<div class="sublines">${d.subs.map((x, i) => `<div class="sl">
             <input class="inp" data-subn="${i}" value="${esc(x.name)}" placeholder="What" maxlength="40" aria-label="Line ${i + 1} name">
             <span class="prefix"><span>${esc(sym(d.cur).trim())}</span><input class="num" data-suba="${i}" inputmode="decimal" value="${esc(x.amt)}" placeholder="0" aria-label="Line ${i + 1} amount"></span>
-            <button type="button" class="x-btn" data-act="sub-del" data-i="${i}" aria-label="Remove line ${i + 1}">${ICON.x}</button></div>`).join('')}
+            <button type="button" class="x-btn" data-act="sub-del" data-i="${i}" aria-label="Remove line ${i + 1}" title="Remove this line">${ICON.x}</button>
+            ${x.bk ? `<small class="ap-meta sl-meta">${esc(apMeta(x.bk))}</small><label class="sl-sep" title="For a long plan you pay on its own (like Afterpay Monthly): it leaves this cost and gets its own monthly cost"><input type="checkbox" data-subsep="${i}"${x.sep ? ' checked' : ''}><span>Paid separately</span></label>` : ''}</div>`).join('')}
           <button type="button" class="add-btn" data-act="sub-add" style="margin:0">${ICON.plus}Add a line</button></div>` : ''}
       </div>
       <div class="fld"><span>Repeats</span><div class="chips">${REPEATS.map(([k, l]) => `<button type="button" class="chip" data-act="rep" data-rep="${k}" aria-pressed="${d.rep === k}">${l}</button>`).join('')}</div>
@@ -1092,6 +1095,7 @@
     if (subs) item.subs = subs;
     // An Afterpay cost stays linked: a payment line taken out here counts as deleted, so an update doesn't bring it back.
     if (d.bnpl) { const keep = new Set((subs || []).map(x => x.bk).filter(Boolean)); item.bnpl = Object.assign({}, d.bnpl, { skip: d.bnpl.snap.map(x => x.k).filter(k => !keep.has(k)) }); }
+    const sepPlans = d.bnpl && d.subs ? [...new Set(d.subs.filter(x => x.sep && x.bk).map(x => +x.bk.split(':')[0]))].map(id => (S.bnpl || []).find(pl => pl.id === id)).filter(Boolean) : [];
     const cnt = Object.assign({}, d.count), mk = vm();
     if (d.countNow === !d.optional) delete cnt[mk]; else cnt[mk] = d.countNow;
     if (Object.keys(cnt).length) item.count = cnt;
@@ -1110,10 +1114,15 @@
     closeEditor();
     render();
     toast(split ? `Saved from ${monName(mk)} on` : i >= 0 ? 'Saved' : `Added ${item.name}`);
+    if (sepPlans.length) {
+      let first = null;
+      for (const pl of sepPlans) { const b = apSetSep(pl, true, true); if (!first) first = b; }
+      toast(`${sepPlans.map(pl => pl.store).join(', ')} paid separately: own cost added`, { label: 'Undo', run: () => { const o = JSON.parse(first); S.items = o.items; S.bnpl = o.bnpl; save(); render(); } });
+    }
   }
 
-  function removeItem() {
-    const i = S.items.findIndex(x => x.id === draft.id);
+  function removeItem(id = draft && draft.id) {
+    const i = S.items.findIndex(x => x.id === id);
     if (i < 0) return closeEditor();
     const it = S.items[i], mk = vm();
     addPoint('Before removing ' + it.name);
@@ -1339,7 +1348,22 @@
     for (let i = 0; i < pl.n; i++) { const d = apDate(pl, i); if (pl.off && d > parse(pl.off)) break; out.push({ k: pl.id + ':' + i, d, i, amt: apAmt(pl, i), pl }); }
     return out;
   }
-  const apName = x => `${x.d.getDate()} ${MON[x.d.getMonth()]} · ${x.pl.store.slice(0, 22)} ${x.i + 1} of ${x.pl.n}`;
+  // A line's name is just the shop; which payment it is and its date show beside it (apMeta), not in the name.
+  const apName = x => x.pl.store.slice(0, 40);
+  function apMeta(k) {
+    const [id, i] = String(k || '').split(':').map(Number), pl = (S.bnpl || []).find(x => x.id === id);
+    if (!pl || !(i >= 0)) return '';
+    const d = apDate(pl, i);
+    return `${i + 1}/${pl.n}${i === pl.n - 1 ? ' last' : ''} · ${d.getDate()} ${MON[d.getMonth()]}`;
+  }
+  const apMetaHtml = k => { const m = apMeta(k); return m ? ` <small class="ap-meta">${esc(m)}</small>` : ''; };
+  // Names saved before 27 Nov had the date and payment in them ('19 Dec · Temu 3 of 4'): give every Afterpay line the plain shop name.
+  function apTidyNames() {
+    let ch = false;
+    const nm = k => { const [id, i] = String(k).split(':').map(Number), pl = (S.bnpl || []).find(x => x.id === id); return pl ? apName({ pl, i }) : null; };
+    for (const it of S.items) if (it.bnpl) for (const x of [...(it.subs || []).filter(y => y.bk).map(y => [y, y.bk]), ...it.bnpl.snap.map(y => [y, y.k])]) { const n = nm(x[1]); if (n && x[0].name !== n) { x[0].name = n; ch = true; } }
+    if (ch) save();
+  }
   const apNext = P => paydays(addDays(P, 1), addDays(P, 400))[0] || null;
   const apItem = P => S.items.find(it => it.bnpl && it.bnpl.from === ymd(P));
   // Payments already in another payday's Afterpay cost: a payment due on a payday stays with the cost that took it first.
@@ -1347,7 +1371,7 @@
   // Payments from payday P up to and including the next payday N (so the payday-morning payment is covered).
   function apLines(P, N, exceptId) {
     const taken = apTaken(exceptId), out = [];
-    for (const pl of S.bnpl || []) for (const x of apPays(pl)) if (x.d >= P && x.d <= N && !taken.has(x.k)) out.push(x);
+    for (const pl of S.bnpl || []) if (!pl.sep) for (const x of apPays(pl)) if (x.d >= P && x.d <= N && !taken.has(x.k)) out.push(x);
     return out.sort((a, b) => (a.d - b.d) || a.pl.store.localeCompare(b.pl.store)).map(x => ({ k: x.k, name: apName(x), amt: x.amt }));
   }
   const apSnap = cur => cur.map(({ k, name, amt }) => ({ k, name, amt }));
@@ -1365,6 +1389,27 @@
   // Afterpay costs whose plans changed since they were made, newest payday first (only ones not finished yet).
   const apChanged = () => S.items.filter(it => it.bnpl && parse(it.bnpl.to) >= today() && apDiff(it).any).sort((a, b) => a.bnpl.from < b.bnpl.from ? 1 : -1);
 
+  // A long plan paid on its own (e.g. Afterpay Monthly for a phone): its payments leave the payday Afterpay cost
+  // and it gets its own cost that repeats with the plan and counts down the payments left.
+  function apSetSep(pl, on, quiet) {
+    const before = JSON.stringify({ items: S.items, bnpl: S.bnpl }), mine = k => String(k).startsWith(pl.id + ':');
+    if (on) {
+      pl.sep = true;
+      for (const it of S.items) if (it.bnpl) {
+        it.subs = (it.subs || []).filter(x => !(x.bk && mine(x.bk))); it.amt = apSum(it.subs);
+        it.bnpl.snap = it.bnpl.snap.filter(x => !mine(x.k)); it.bnpl.skip = (it.bnpl.skip || []).filter(k => !mine(k));
+      }
+      const t = today(), rest = apPays(pl).filter(x => x.d >= t);
+      if (rest.length && !S.items.some(it => it.bnplPlan === pl.id)) S.items.push({ id: S.nextId++, list: 'home', name: `${pl.store} (Afterpay)`.slice(0, 60), amt: rest[0].amt, cur: S.profile.home,
+        rep: pl.gap === 'month' ? 'month' : 'fortnight', due: ymd(rest[0].d), left: rest.length, paid: [], created: ymd(t), bnplPlan: pl.id });
+    } else {
+      delete pl.sep;
+      S.items = S.items.filter(it => it.bnplPlan !== pl.id);
+    }
+    save(); render();
+    if (!quiet) toast(on ? `${pl.store} is paid separately: its own cost` : `${pl.store} is back in the Afterpay cost`, { label: 'Undo', run: () => { const o = JSON.parse(before); S.items = o.items; S.bnpl = o.bnpl; save(); render(); } });
+    return before;
+  }
   function apAdd(from) {
     const P = parse(from), N = apNext(P);
     if (!N || apItem(P)) return;
@@ -1403,8 +1448,8 @@
   }
   // The open breakdown of an Afterpay cost: × deletes a line, a deleted line stays crossed out with Undo.
   function apSubsHtml(it) {
-    const live = (it.subs || []).map(x => `<div class="subl ap-l"><span>${esc(x.name)}</span><span>${money(x.amt, it.cur)}</span>${x.bk ? `<button type="button" class="ap-x" data-act="ap-line-del" data-id="${it.id}" data-k="${esc(x.bk)}" aria-label="Delete ${esc(x.name)}" title="Delete this line">${ICON.x}</button>` : '<span class="ap-x" aria-hidden="true"></span>'}</div>`).join('');
-    const gone = (it.bnpl.skip || []).map(k => it.bnpl.snap.find(y => y.k === k)).filter(Boolean).map(x => `<div class="subl ap-l gone"><span>${esc(x.name)}</span><span>${money(x.amt, it.cur)}</span><button type="button" class="ap-undo" data-act="ap-line-back" data-id="${it.id}" data-k="${esc(x.k)}" title="Put this line back">Undo</button></div>`).join('');
+    const live = (it.subs || []).map(x => `<div class="subl ap-l"><span>${esc(x.name)}${apMetaHtml(x.bk)}</span><span>${money(x.amt, it.cur)}</span>${x.bk ? `<button type="button" class="ap-x" data-act="ap-line-del" data-id="${it.id}" data-k="${esc(x.bk)}" aria-label="Delete ${esc(x.name)}" title="Delete this line">${ICON.x}</button>` : '<span class="ap-x" aria-hidden="true"></span>'}</div>`).join('');
+    const gone = (it.bnpl.skip || []).map(k => it.bnpl.snap.find(y => y.k === k)).filter(Boolean).map(x => `<div class="subl ap-l gone"><span>${esc(x.name)}${apMetaHtml(x.k)}</span><span>${money(x.amt, it.cur)}</span><button type="button" class="ap-undo" data-act="ap-line-back" data-id="${it.id}" data-k="${esc(x.k)}" title="Put this line back">Undo</button></div>`).join('');
     return `<div class="subs">${live}${gone}<div class="subl t ap-l"><span>Total</span><span>${money(it.amt, it.cur)}</span><span class="ap-x" aria-hidden="true"></span></div></div>`;
   }
   // Banner at the top of the Budget screen when the plans changed after an Afterpay cost was made.
@@ -1424,14 +1469,17 @@
       const B = apNext(A);
       if (!B) break;
       const xs = all.filter(x => x.d > A && x.d <= B).sort((a, b) => a.d - b.d);
-      if (xs.length) rows.push(`<div class="ap-ah"><span class="ap-ah-p">${dd(A)} → ${dd(B)}</span><b class="num">${money(r2(xs.reduce((a, x) => a + x.amt, 0)), p.home)}</b><small>${xs.map(x => `${esc(x.pl.store.slice(0, 16))} ${x.i + 1}/${x.pl.n}${x.i === x.pl.n - 1 ? ' (last)' : ''}`).join(' · ')}</small></div>`);
+      if (xs.length) rows.push(`<div class="ap-ah"><span class="ap-ah-p">${dd(A)} → ${dd(B)}</span><b class="num">${money(r2(xs.reduce((a, x) => a + x.amt, 0)), p.home)}</b><small>${xs.map(x => `${esc(x.pl.store.slice(0, 16))} ${x.i + 1}/${x.pl.n}${x.i === x.pl.n - 1 ? ' (last)' : ''}${x.pl.sep ? ' · own cost' : ''}`).join(' · ')}</small></div>`);
       A = B;
     }
     return `<div class="ap-ahead"><div class="ap-foot"><span>Still owed after ${dd(N)}</span><b>${money(r2(all.reduce((a, x) => a + x.amt, 0)), p.home)} · ${all.length} payment${all.length === 1 ? '' : 's'}</b></div>
-      <div class="ap-fin">All Afterpay finished ${esc(shortDate(last))} ${last.getFullYear()}</div>${rows.join('')}</div>`;
+      <div class="ap-fin">All Afterpay finished ${esc(shortDate(last))} ${last.getFullYear()}</div>
+      ${rows.length ? `<button type="button" class="ap-ah-tg" data-act="ap-ahead" aria-expanded="${apAheadOn}" title="${apAheadOn ? 'Hide' : 'Show'} each pay period until the last payment"><span>Coming up · ${rows.length} pay period${rows.length === 1 ? '' : 's'}</span>${ICON.chev}</button>` : ''}${apAheadOn ? rows.join('') : ''}</div>`;
   }
   // Card on the Local list: what Afterpay takes from each payday in the month shown.
+  // Once a payday's Afterpay cost is added and up to date the card folds to one line (tap to open).
   function apCardHtml() {
+    apTidyNames();
     const p = S.profile, plans = S.bnpl || [];
     if (!plans.length) return `<div class="ap-card ap-empty"><span class="ap-t"><b>Afterpay</b><small>Add your plans to see what to set aside each payday.</small></span><span class="ap-two"><button type="button" class="btn-ghost ap-sm" data-act="ap-plans" title="Add your Afterpay plans one by one">Add a plan</button>${apUpBtn('btn-ghost ap-sm ap-up')}</span></div>`;
     return paydays(vmFrom(), vmTo()).map(P => {
@@ -1444,12 +1492,17 @@
       const plansBtn = `${apUpBtn('link ap-up-l')}<button type="button" class="link ap-plans" data-act="ap-plans" title="Add, change or delete your Afterpay plans">Plans (${plans.length})</button>`;
       if (it) {
         const ch = apDiff(it).any;
-        return `<div class="ap-card"><div class="ap-links">${plansBtn}</div>${head(it.amt, `In ${esc(mon)} costs as “${esc(it.name)}”`)}
+        if (!ch && !apOpen.has(ymd(P))) {
+          const ends = plans.map(pl => { const ps = apPays(pl); return ps.length ? ps[ps.length - 1].d : null; }).filter(Boolean), end = ends.length ? new Date(Math.max(...ends)) : null;
+          return `<div class="ap-card ap-mini"><button type="button" class="ap-mini-b" data-act="ap-open" data-from="${ymd(P)}" aria-expanded="false" title="Show Afterpay details: each pay until the last payment">
+            <span class="ap-t"><b>Afterpay · ${money(it.amt, p.home)} ✓</b><small>In ${esc(mon)} costs · ${dd(P)} → ${dd(N)}${end ? ` · all done ${end.getDate()} ${MON[end.getMonth()]} ${end.getFullYear()}` : ''}</small></span>${ICON.chev}</button><span class="ap-mini-l">${apUpBtn('link ap-up-l')}<button type="button" class="link ap-plans" data-act="ap-plans" title="Add, change or delete your Afterpay plans">Plans (${plans.length})</button></span></div>`;
+        }
+        return `<div class="ap-card"><div class="ap-links">${ch ? '' : `<button type="button" class="link" data-act="ap-open" data-from="${ymd(P)}" title="Fold the Afterpay card">Hide</button>`}${plansBtn}</div>${head(it.amt, `In ${esc(mon)} costs as “${esc(it.name)}”`)}
           ${ch ? `<div class="ap-warn"><span>Your plans changed since you added it.</span><button type="button" class="link" data-act="ap-review" data-id="${it.id}" title="See what changed and update the cost">Review</button></div>` : `<div class="ap-ok">${ICON.check}<span>Added to ${esc(mon)} costs · up to date</span></div>`}
           ${owed}</div>`;
       }
       const cur = apLines(P, N), tot = r2(cur.reduce((a, x) => a + x.amt, 0));
-      const lines = cur.length ? `<div class="ap-lines">${cur.map(x => `<div class="subl"><span>${esc(x.name)}</span><span>${money(x.amt, p.home)}</span></div>`).join('')}</div>` : '';
+      const lines = cur.length ? `<div class="ap-lines">${cur.map(x => `<div class="subl"><span>${esc(x.name)}${apMetaHtml(x.k)}</span><span>${money(x.amt, p.home)}</span></div>`).join('')}</div>` : '';
       return `<div class="ap-card"><div class="ap-links">${plansBtn}</div>${head(tot, cur.length ? `${cur.length} payment${cur.length === 1 ? '' : 's'} to set aside` : 'Nothing due before your next pay')}${lines}
         ${cur.length ? `<button type="button" class="btn ap-btn" data-act="ap-add" data-from="${ymd(P)}" title="Make one cost, Afterpay, in ${esc(mon)} with these payments as its lines">${ICON.plus}Add to ${esc(mon)} costs</button>` : ''}
         ${owed}</div>`;
@@ -1459,7 +1512,7 @@
   // ----- Afterpay dialogs: plans list + add/edit form, and "what changed" -----
   function apOpenPlans(form) { dlg = { kind: 'ap-plans', form: form || null, sure: null }; renderDlg(); }
   function apNewForm(pl) {
-    return pl ? { id: pl.id, store: pl.store, total: String(pl.total), first: pl.first, n: String(pl.n), gap: pl.gap, off: !!pl.off }
+    return pl ? { id: pl.id, store: pl.store, total: String(pl.total), first: pl.first, n: String(pl.n), gap: pl.gap, off: !!pl.off, sep: !!pl.sep }
       : { id: null, store: '', total: '', first: ymd(today()), n: '4', gap: 'fortnight', off: false };
   }
   function apReadForm() {
@@ -1468,6 +1521,7 @@
     const s = v('ap-store'), t = v('ap-total'), d = v('ap-first'), n = v('ap-n'), o = document.getElementById('ap-off');
     if (s != null) f.store = s; if (t != null) f.total = t; if (d != null) f.first = d; if (n != null) f.n = n.replace(/[^0-9]/g, '');
     if (o) f.off = o.checked;
+    const sp = document.getElementById('ap-sep'); if (sp) f.sep = sp.checked;
   }
   function apPreview(f) {
     const n = Math.floor(num(f.n)), tot = num(f.total);
@@ -1482,7 +1536,7 @@
       const end = pays.length ? pays[pays.length - 1].d : parse(pl.first), done = pays.filter(x => x.d < t).length, toGo = r2(pays.filter(x => x.d >= t).reduce((a, x) => a + x.amt, 0));
       const sub = pl.off ? `Paid off ${shortDate(parse(pl.off))}` : next ? `Payment ${next.i + 1} of ${pl.n} next: ${shortDate(next.d)} · ${money(next.amt, p.home)}` : `Finished ${shortDate(end)}`;
       const fin = pl.off || !next ? '' : `<small>${done} paid · ${money(toGo, p.home)} to go · finishes ${esc(shortDate(end))} ${end.getFullYear()}</small>`;
-      return `<div class="ap-plan${next || pl.off ? '' : ' ap-done'}"><span class="ap-t"><b>${esc(pl.store)}</b><small>${money(pl.total, p.home)} · ${pl.n} payments ${pl.gap === 'month' ? 'monthly' : 'every 2 weeks'}${pl.order ? ` · order ${esc(pl.order)}` : ''}</small><small class="ap-nx">${esc(sub)}</small>${fin}</span>
+      return `<div class="ap-plan${next || pl.off ? '' : ' ap-done'}"><span class="ap-t"><b>${esc(pl.store)}${pl.sep ? ' <span class="tag-opt">Paid separately</span>' : ''}</b><small>${money(pl.total, p.home)} · ${pl.n} payments ${pl.gap === 'month' ? 'monthly' : 'every 2 weeks'}${pl.order ? ` · order ${esc(pl.order)}` : ''}</small><small class="ap-nx">${esc(sub)}</small>${fin}</span>
         <button type="button" class="x-btn" data-act="ap-edit" data-id="${pl.id}" aria-label="Change ${esc(pl.store)}" title="Change this plan">${ICON.pen}</button>
         <button type="button" class="${sure ? 'btn-danger' : 'btn-ghost'} ap-sm" data-act="ap-del" data-id="${pl.id}" title="${sure ? 'Tap again to delete this plan' : 'Delete this plan'}">${sure ? 'Tap again' : 'Delete'}</button></div>`;
     }).join('');
@@ -1494,6 +1548,7 @@
         <label class="inline"><span>Payments</span><input class="inp" id="ap-n" inputmode="numeric" value="${esc(f.n)}" aria-label="Number of payments" title="Afterpay is usually 4"></label>
         <div class="chips">${AP_GAPS.map(([k, l]) => `<button type="button" class="chip" data-act="ap-gap" data-gap="${k}" aria-pressed="${f.gap === k}" title="Payments ${l.toLowerCase()}">${l}</button>`).join('')}</div>
         <small class="ap-prev" id="ap-prev">${esc(apPreview(f))}</small>
+        <label class="chk chk-box"><input type="checkbox" id="ap-sep"${f.sep ? ' checked' : ''}><span>Paid separately<small>For a long plan you pay on its own (like Afterpay Monthly). It gets its own cost and stays out of the payday Afterpay cost.</small></span></label>
         ${f.id ? `<label class="chk chk-box"><input type="checkbox" id="ap-off"${f.off ? ' checked' : ''}><span>I paid it off early<small>Payments after today are taken off.</small></span></label>` : ''}
         <p class="err" id="ap-err" hidden></p>
         <div class="dlg-actions"><button type="button" class="btn-ghost" data-act="ap-form-x">Cancel</button><button type="button" class="btn" data-act="ap-save">${f.id ? 'Save' : 'Add plan'}</button></div>
@@ -1520,10 +1575,12 @@
     if (old && old.order) pl.order = old.order;
     if (old && old.known && old.n === n && old.gap === f.gap && old.first === f.first && Math.abs(old.total - total) < 0.005) { pl.known = old.known; pl.dates = old.dates; pl.each = old.each; }
     if (f.off) pl.off = old && old.off ? old.off : ymd(today());
+    if (old && old.sep) pl.sep = true;
     if (old) S.bnpl[S.bnpl.indexOf(old)] = pl; else S.bnpl.push(pl);
     save(); render();
     dlg.form = null; renderDlg();
     toast(old ? `Saved ${pl.store}` : `Added ${pl.store}`);
+    if (!!f.sep !== !!pl.sep) { apSetSep(pl, !!f.sep); renderDlg(); }
   }
   function apDelPlan(id) {
     if (dlg.sure !== id) { dlg.sure = id; renderDlg(); return; }
@@ -1542,9 +1599,9 @@
     const d = apDiff(it), skip = (it.bnpl.skip || []).filter(k => d.cur.some(x => x.k === k)), nw = apBuild(d.cur, skip).amt;
     const touched = new Set([...d.added, ...d.changed].map(x => x.k)), same = d.cur.filter(x => !touched.has(x.k));
     const row = (cls, sign, text, amt) => `<div class="ap-d ${cls}"><b aria-hidden="true">${sign}</b><span>${text}</span><b class="num">${amt}</b></div>`;
-    const rows = d.added.map(x => row('add', '+', `<b>New:</b> ${esc(x.name)}`, money(x.amt, p.home)))
-      + d.gone.map(x => row('rm', '−', `<b>Gone:</b> ${esc(x.name)}`, `<s>${money(x.amt, p.home)}</s>`))
-      + d.changed.map(x => row('chg', '~', `<b>Changed:</b> ${esc(x.name)}`, `${money(x.was, p.home)} → ${money(x.amt, p.home)}`))
+    const rows = d.added.map(x => row('add', '+', `<b>New:</b> ${esc(x.name)}${apMetaHtml(x.k)}`, money(x.amt, p.home)))
+      + d.gone.map(x => row('rm', '−', `<b>Gone:</b> ${esc(x.name)}${apMetaHtml(x.k)}`, `<s>${money(x.amt, p.home)}</s>`))
+      + d.changed.map(x => row('chg', '~', `<b>Changed:</b> ${esc(x.name)}${apMetaHtml(x.k)}`, `${money(x.was, p.home)} → ${money(x.amt, p.home)}`))
       + (same.length ? row('', '', `${same.length} line${same.length === 1 ? '' : 's'} unchanged`, money(r2(same.reduce((a, x) => a + x.amt, 0)), p.home)) : '');
     return `<div class="overlay" data-act="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
       <div class="dlg-head"><h2 id="dlg-t">Update ${esc(monName(monthKey(parse(it.bnpl.from))))}'s Afterpay?</h2></div>
@@ -1665,10 +1722,44 @@
   }
 
   // ---------- events ----------
+  // Swipe a cost row left to show Delete (phones). A tap anywhere else closes it.
+  let swipe = null, swOpen = null;
+  const swClose = () => { if (swOpen) { swOpen.classList.remove('swiped'); swOpen = null; } };
+  $app.addEventListener('touchstart', e => {
+    const r = e.target.closest('.row-w');
+    if (swOpen && swOpen !== r) swClose();
+    swipe = r && e.touches.length === 1 && !e.target.closest('.swipe-del') ? { r, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, lock: null, base: r.classList.contains('swiped') ? -88 : 0 } : null;
+  }, { passive: true });
+  $app.addEventListener('touchmove', e => {
+    if (!swipe) return;
+    const dx = e.touches[0].clientX - swipe.x, dy = e.touches[0].clientY - swipe.y;
+    if (!swipe.lock) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      swipe.lock = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      if (swipe.lock === 'x') swipe.r.classList.add('swiping');
+    }
+    if (swipe.lock !== 'x') return;
+    e.preventDefault();
+    swipe.dx = dx;
+    swipe.r.style.setProperty('--sx', Math.max(-120, Math.min(0, swipe.base + dx)) + 'px');
+  }, { passive: false });
+  const swEnd = () => {
+    if (!swipe) return;
+    const s = swipe; swipe = null;
+    if (s.lock !== 'x') return;
+    s.r.classList.remove('swiping'); s.r.style.removeProperty('--sx');
+    if (s.base + s.dx < -44) { s.r.classList.add('swiped'); swOpen = s.r; } else { s.r.classList.remove('swiped'); if (swOpen === s.r) swOpen = null; }
+  };
+  $app.addEventListener('touchend', swEnd);
+  $app.addEventListener('touchcancel', swEnd);
   $app.addEventListener('click', e => {
+    if (swOpen && !e.target.closest('.swipe-del')) { e.preventDefault(); swClose(); return; }
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const act = b.dataset.act;
+    if (act === 'swipe-del') { swOpen = null; removeItem(+b.dataset.id); return; }
+    if (act === 'ap-open') { const k = b.dataset.from; if (apOpen.has(k)) apOpen.delete(k); else apOpen.add(k); render(); return; }
+    if (act === 'ap-ahead') { apAheadOn = !apAheadOn; render(); return; }
     if (act === 'nav') { view = b.dataset.view; confirmReset = false; confirmRp = null; render(); window.scrollTo(0, 0); }
     else if (act === 'rp') { const at = +b.dataset.at; if (confirmRp === at) restorePoint(at); else { confirmRp = at; render(); } }
     else if (act === 'tab') { tab = b.dataset.tab; render(); }
@@ -1827,6 +1918,7 @@
     }
     if (!draft) return;
     if (e.target.id === 'd-due') { draft.due = e.target.value; updateEditorTexts(); }
+    if (e.target.dataset.subsep != null) { const x = draft.subs[+e.target.dataset.subsep], pid = x.bk.split(':')[0]; for (const y of draft.subs) if (y.bk && y.bk.split(':')[0] === pid) y.sep = e.target.checked; renderEditor(); }
     if (e.target.id === 'd-brk') {
       if (e.target.checked) draft.subs = [{ name: draft.name.trim(), amt: hasNum(draft.amt) ? String(num(draft.amt)) : '' }];
       else { draft.amt = subsTotal().toFixed(2); draft.subs = null; }
